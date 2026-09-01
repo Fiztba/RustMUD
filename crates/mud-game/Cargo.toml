@@ -1,0 +1,17 @@
+[package]
+name = "mud-game"
+description = "The simulation: interpreter, commands, world runtime, login, pulse engine"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+mud-data = { path = "../mud-data" }
+mud-net = { path = "../mud-net" }
+mud-sys = { path = "../mud-sys" }
+mud-world = { path = "../mud-world" }
+mio = { version = "1", features = ["net", "os-poll"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[lints]
+workspace = true

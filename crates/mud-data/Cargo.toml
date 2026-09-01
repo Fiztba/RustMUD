@@ -1,0 +1,11 @@
+[package]
+name = "mud-data"
+description = "Pure data layer: constants, flags, numeric tables, and the circle RNG"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

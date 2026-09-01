@@ -1,0 +1,22 @@
+[package]
+name = "mud-server"
+description = "The RustMUD server binary"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[[bin]]
+name = "circle"
+path = "src/main.rs"
+
+[dependencies]
+mud-data = { path = "../mud-data" }
+mud-game = { path = "../mud-game" }
+mud-sys = { path = "../mud-sys" }
+mud-net = { path = "../mud-net" }
+mud-world = { path = "../mud-world" }
+mio = { version = "1", features = ["net", "os-poll"] }
+socket2 = "0.6.5"
+
+[lints]
+workspace = true

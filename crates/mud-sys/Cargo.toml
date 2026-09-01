@@ -1,0 +1,15 @@
+[package]
+name = "mud-sys"
+description = "The copyover socket handoff — the workspace's only unsafe code"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+
+# The workspace forbids unsafe everywhere else. Handing a live socket to a
+# successor process is the one thing that cannot be expressed safely: it needs
+# fcntl/exec on Unix and WSADuplicateSocketW/WSASocketW on Windows. Confining
+# it to this crate keeps the rest of the tree auditable.
+[lints.rust]
+unsafe_code = "deny"

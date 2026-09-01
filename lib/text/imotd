@@ -1,0 +1,11 @@
+
+Welcome to RustMUD!
+
+This is the immortal MOTD -- the file that immortals will see when they
+log in to the game.  You should change it to something more interesting
+when you get a chance (as well as most of the other files in lib/text.)
+
+This server is a from-scratch Rust rewrite of tbaMUD, which is itself a
+CircleMUD derivative.  It is not tbaMUD and is not supported by them: do
+not take questions about this server to the tbaMUD staff or forums.
+

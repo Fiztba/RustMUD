@@ -1,0 +1,12 @@
+[package]
+name = "mud-world"
+description = "World-file formats (parse + write), world model, boot, zone resets"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+mud-data = { path = "../mud-data" }
+
+[lints]
+workspace = true

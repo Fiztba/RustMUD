@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/mud-data",
+    "crates/mud-world",
+    "crates/mud-game",
+    "crates/mud-net",
+    "crates/mud-sys",
+    "crates/mud-server",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license-file = "LICENSE"
+repository = "https://github.com/Fiztba/RustMUD"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+debug = true

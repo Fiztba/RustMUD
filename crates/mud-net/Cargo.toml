@@ -1,0 +1,13 @@
+[package]
+name = "mud-net"
+description = "Telnet + KaVir protocol layer, descriptor buffering, pager, editor"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+mud-data = { path = "../mud-data" }
+mio = { version = "1", features = ["net", "os-poll"] }
+
+[lints]
+workspace = true
