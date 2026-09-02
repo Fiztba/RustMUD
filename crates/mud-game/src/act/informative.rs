@@ -1382,7 +1382,10 @@ pub fn do_help(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd
                         out.extend_from_slice(b"\r\nDid you mean:\r\n");
                         first = false;
                     }
-                    out.extend_from_slice(b"  \t<send link=\"Help ");
+                    // MXP's attribute is href; a <send> with no href sends its
+                    // own text as the command, so the old link= form ran the
+                    // keyword instead of asking for its help.
+                    out.extend_from_slice(b"  \t<send href=\"help ");
                     out.extend_from_slice(&entry.keyword);
                     out.extend_from_slice(b"\">");
                     out.extend_from_slice(&entry.keyword);

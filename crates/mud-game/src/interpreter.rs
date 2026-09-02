@@ -765,9 +765,12 @@ pub fn command_interpreter(g: &mut Game, chid: CharId, argument: &[u8]) {
                     out.extend_from_slice(b"\r\nDid you mean:\r\n");
                     first = false;
                 }
-                out.extend_from_slice(b"  ");
+                // The same clickable form the help suggestions use; a <send>
+                // with no href sends its text, which for a command is what a
+                // click should send.
+                out.extend_from_slice(b"  \t<send>");
                 out.extend_from_slice(&entry.command);
-                out.extend_from_slice(b"\r\n");
+                out.extend_from_slice(b"\t</send>\r\n");
             }
         }
         if !out.is_empty() {
