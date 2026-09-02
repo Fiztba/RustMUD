@@ -76,7 +76,7 @@ pub fn read_mobile(g: &mut Game, rnum: Idx) -> Option<CharId> {
     mob.proto_script = proto.proto_script.clone();
 
     let id = g.chars.insert(mob);
-    g.character_list.insert(0, id);
+    g.character_list.push_front(id);
     g.mob_counts[rnum as usize] += 1;
     mud_data::rng::rng_trace_note(&format!(
         "read_mobile: {}",
@@ -120,7 +120,7 @@ pub fn read_object(g: &mut Game, rnum: Idx) -> Option<ObjId> {
         script: None,
     };
     let id = g.objs.insert(obj);
-    g.object_list.insert(0, id);
+    g.object_list.push_front(id);
     g.obj_counts[rnum as usize] += 1;
     // copy_proto_script + assign_triggers.
     crate::dg::assign_triggers(g, crate::dg::GoId::Obj(id));

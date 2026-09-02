@@ -1872,7 +1872,7 @@ fn perform_mortal_where(g: &mut Game, chid: CharId, arg: &[u8]) {
             let room = g.ch(chid).in_room;
             g.world.rooms[room as usize].zone
         };
-        let candidates: Vec<CharId> = g.character_list.clone();
+        let candidates: Vec<CharId> = g.character_list.iter().copied().collect();
         for tch in candidates {
             let Some(t) = g.try_ch(tch) else { continue };
             if t.in_room == NOWHERE || !can_see(g, chid, tch) {

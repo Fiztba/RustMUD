@@ -115,9 +115,12 @@ pub struct Game {
 
     pub chars: Arena<Char, CharTag>,
     pub objs: Arena<Obj, ObjTag>,
-    /// Global lists, newest-first. Iteration order is observable.
-    pub character_list: Vec<CharId>,
-    pub object_list: Vec<ObjId>,
+    /// Global lists, newest-first. Iteration order is observable. Deques,
+    /// not Vecs: the C prepends to a linked list in O(1), and with a
+    /// million mobs loading at boot a Vec::insert(0, ..) per load is
+    /// quadratic.
+    pub character_list: std::collections::VecDeque<CharId>,
+    pub object_list: std::collections::VecDeque<ObjId>,
     /// Live instance counts per prototype.
     pub mob_counts: Vec<i32>,
     pub obj_counts: Vec<i32>,

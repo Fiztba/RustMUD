@@ -349,7 +349,7 @@ fn postmaster_receive_mail(g: &mut Game, chid: CharId, mailman: CharId) {
         obj.action_description = Some(text);
 
         let oid = g.objs.insert(obj);
-        g.object_list.insert(0, oid);
+        g.object_list.push_front(oid);
         crate::handler::obj_to_char(g, oid, chid);
 
         act(g, b"$n gives you a piece of mail.", false, Some(mailman), None, Some(chid), TO_VICT);

@@ -503,7 +503,7 @@ pub fn enter_player_game(g: &mut Game, di: usize) -> i32 {
     if g.ch(chid).script.is_none() {
         crate::players_glue::read_saved_vars(g, chid);
     }
-    g.character_list.insert(0, chid);
+    g.character_list.push_front(chid);
     char_to_room(g, chid, room);
     let load_result = crate::objsave::crash_load(g, chid);
     // Save the character and their object file.

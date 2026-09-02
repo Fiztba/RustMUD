@@ -13,7 +13,7 @@ members = [
 edition = "2024"
 version = "0.1.0"
 license-file = "LICENSE"
-repository = "https://github.com/Fiztba/RustMUD"
+repository = "https://github.com/Fiztba/RustMUD.git"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

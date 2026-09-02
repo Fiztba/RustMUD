@@ -109,7 +109,7 @@ pub fn add_room(g: &mut Game, room: &Room, light: i32) -> Option<RoomRnum> {
     // in_room values are still pre-insert indices here, so the test is
     // against `found` itself. `was_in_room` is deliberately left alone —
     // nothing else touches it.
-    let ids: Vec<_> = g.character_list.clone();
+    let ids: Vec<_> = g.character_list.iter().copied().collect();
     for id in ids {
         if let Some(c) = g.chars.get_mut(id) {
             if c.in_room != NOWHERE && c.in_room as usize >= found {
@@ -117,7 +117,7 @@ pub fn add_room(g: &mut Game, room: &Room, light: i32) -> Option<RoomRnum> {
             }
         }
     }
-    let oids: Vec<_> = g.object_list.clone();
+    let oids: Vec<_> = g.object_list.iter().copied().collect();
     for id in oids {
         if let Some(o) = g.objs.get_mut(id) {
             if o.in_room != NOWHERE && o.in_room as usize >= found {
@@ -368,7 +368,7 @@ pub fn delete_room(g: &mut Game, rnum: RoomRnum) -> bool {
             *v -= 1;
         }
     }
-    let ids: Vec<_> = g.character_list.clone();
+    let ids: Vec<_> = g.character_list.iter().copied().collect();
     for id in ids {
         if let Some(c) = g.chars.get_mut(id) {
             if c.in_room != NOWHERE && c.in_room > rnum {
@@ -390,7 +390,7 @@ pub fn delete_room(g: &mut Game, rnum: RoomRnum) -> bool {
             }
         }
     }
-    let oids: Vec<_> = g.object_list.clone();
+    let oids: Vec<_> = g.object_list.iter().copied().collect();
     for id in oids {
         if let Some(o) = g.objs.get_mut(id) {
             if o.in_room != NOWHERE && o.in_room > rnum {

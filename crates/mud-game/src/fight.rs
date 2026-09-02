@@ -249,7 +249,7 @@ fn make_corpse(g: &mut Game, chid: CharId) {
         g.config.max_pc_corpse_time
     };
     let oid = g.objs.insert(obj);
-    g.object_list.insert(0, oid);
+    g.object_list.push_front(oid);
 
     // Transfer inventory wholesale (corpse->contains = ch->carrying;
     // object_list_new_owner clears carried_by).

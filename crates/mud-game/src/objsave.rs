@@ -612,7 +612,7 @@ pub fn objsave_parse_objects(g: &mut Game, r: &mut Reader) -> Vec<ObjSaveData> {
             if nr == NOTHING as i32 {
                 let o = crate::obj::create_obj();
                 let id = g.objs.insert(o);
-                g.object_list.insert(0, id);
+                g.object_list.push_front(id);
                 temp = Some(id);
             } else if nr < 0 {
                 continue;

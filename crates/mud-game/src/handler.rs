@@ -1367,7 +1367,7 @@ pub fn create_money(g: &mut Game, amount: i32) -> Option<ObjId> {
     obj.item_number = NOTHING;
 
     let id = g.objs.insert(obj);
-    g.object_list.insert(0, id);
+    g.object_list.push_front(id);
     Some(id)
 }
 
