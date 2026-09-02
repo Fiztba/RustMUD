@@ -189,6 +189,13 @@ unattended, capture it.
 it was not willing to guess about, and most of them name the zone, room or
 trigger at fault.
 
+The per-topic files under `log/` beside the data directory (`log/errors`,
+`log/help`, `log/godcmds`, `log/olc` and the rest) are what the in-game `file`
+command reads. tbaMUD's autorun script fills them by grepping the syslog when
+the game exits; this server appends to them itself, as each line is logged,
+so they are current while the game is up. Nothing trims them, so rotate or
+truncate them yourself if they matter to you.
+
 ## What to back up
 
 `lib/` — all of it, and while the server is down or at least quiet. The parts

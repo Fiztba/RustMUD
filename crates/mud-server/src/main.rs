@@ -307,8 +307,13 @@ fn open_mother_connection(
     let _ = sock.set_linger(None);
 
     sock.bind(&std::net::SocketAddr::new(bind_ip, port).into())?;
-    // Five pending connections is plenty; players are accepted immediately.
-    sock.listen(5)?;
+    // The C listened with a backlog of 5, and a reconnect flood after a
+    // crash showed what that costs: the queue fills, the kernel drops the
+    // SYNs behind it, and every client past the fifth sits in TCP's
+    // retransmit back-off, so 250 players took 42 seconds to be greeted.
+    // 128 is what the kernel caps at by default; it holds a whole reconnect
+    // burst while the loop drains it.
+    sock.listen(128)?;
     Ok(sock.into())
 }
 
