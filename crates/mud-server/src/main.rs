@@ -26,7 +26,33 @@ fn timestamp(now: i64, tz_offset_secs: i64) -> String {
 struct Logger {
     file: Option<std::fs::File>,
     tz: i64,
+    /// The data directory; the topic files live beside it, in ../log/.
+    lib: std::path::PathBuf,
 }
+
+/// The per-topic files under log/ that the file command reads. tbaMUD's
+/// autorun script filled them by grepping the syslog when the game exited,
+/// so between restarts they were stale, and a copyover never exits. The
+/// server appends each matching line itself, as it is logged. The patterns
+/// and files are autorun's own table, matched as fgrep matched them:
+/// anywhere in the line, case-sensitively.
+const TOPIC_LOGS: [(&str, &str); 15] = [
+    ("self-delete", "delete"),
+    ("PCLEAN", "delete"),
+    ("death trap", "dts"),
+    ("killed", "rip"),
+    ("Running", "restarts"),
+    ("advanced", "levels"),
+    ("equipment lost", "rentgone"),
+    ("usage", "usage"),
+    ("new player", "newplayers"),
+    ("SYSERR", "errors"),
+    ("(GC)", "godcmds"),
+    ("Bad PW", "badpws"),
+    ("OLC", "olc"),
+    ("get help on", "help"),
+    ("trigger", "trigger"),
+];
 
 impl Logger {
     fn log(&mut self, now: i64, msg: &str) {
@@ -37,6 +63,17 @@ impl Logger {
             }
             None => {
                 let _ = std::io::stderr().write_all(line.as_bytes());
+            }
+        }
+        // A topic file that cannot be opened (no log/ directory, say) is
+        // simply not kept; nothing here logs, which would recurse.
+        for (pattern, name) in TOPIC_LOGS {
+            if !msg.contains(pattern) {
+                continue;
+            }
+            let path = self.lib.join("..").join("log").join(name);
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = f.write_all(line.as_bytes());
             }
         }
     }
@@ -442,6 +479,7 @@ fn main() {
             .as_ref()
             .and_then(|n| std::fs::OpenOptions::new().create(true).append(true).open(n).ok()),
         tz: mud_game::run::local_tz_offset_secs(0),
+        lib: std::path::PathBuf::from(&dir),
     };
     let boot_now = now_unix();
     logger.log(boot_now, "Loading configuration.");
