@@ -218,6 +218,87 @@ pub fn create_world_index(g: &mut Game, znum: i32, type_: &str) {
     let _ = std::fs::rename(&new_name, &old_name);
 }
 
+/// Rewrite one index file without `<znum>.<type>`'s line. `complain` is false
+/// for index.mini, which a world is not obliged to have at all. Returns
+/// whether the file is now in the state the caller wanted.
+fn strip_index_entry(g: &mut Game, dir: &std::path::Path, index_name: &str, znum: i32) -> bool {
+    let old_name = dir.join(index_name);
+    let new_name = dir.join(format!("new{}", index_name));
+
+    let Ok(data) = std::fs::read(&old_name) else {
+        // index.mini need not exist; the caller decides whether that matters.
+        return false;
+    };
+
+    let mut out: Vec<u8> = Vec::new();
+    let mut found = false;
+    for line in index_lines(&data) {
+        if line.first() == Some(&b'$') {
+            out.extend_from_slice(b"$
+");
+            break;
+        }
+        if !found && crate::handler::atoi(&line) == znum {
+            found = true; // the line being removed; do not copy it
+            continue;
+        }
+        out.extend_from_slice(&line);
+        out.push(b'\n');
+    }
+
+    // Only disturb the real file if there was something to take out of it.
+    if !found {
+        return true;
+    }
+    if std::fs::write(&new_name, &out).is_err() {
+        let msg = format!("SYSERR: OLC: Failed to open {}.", new_name.display());
+        g.mudlog(MudlogKind::Brf, LVL_IMPL, true, &msg);
+        return false;
+    }
+    let _ = std::fs::remove_file(&old_name);
+    if std::fs::rename(&new_name, &old_name).is_err() {
+        let msg = format!("SYSERR: OLC: Failed to install {}.", old_name.display());
+        g.mudlog(MudlogKind::Brf, LVL_IMPL, true, &msg);
+        return false;
+    }
+    true
+}
+
+/// Take a zone back out of the world index files: the inverse of
+/// create_world_index. The files themselves are left for the caller.
+///
+/// Both indexes, index.mini first, and stop if that half fails. A zone still
+/// named in index.mini after its file has gone stops a `-m` boot dead, because
+/// index_boot exits on a listed file it cannot open; but a zone merely absent
+/// from index.mini is only not loaded in mini mode, which is harmless. Doing
+/// the harmless one first and returning on failure is what keeps the
+/// boot-critical index untouched when the pair cannot be completed.
+pub fn remove_world_index(g: &mut Game, znum: i32, type_: &str) -> bool {
+    let prefix = match type_.as_bytes().first() {
+        Some(b'z') => "zon",
+        Some(b'w') => "wld",
+        Some(b'o') => "obj",
+        Some(b'm') => "mob",
+        Some(b's') => "shp",
+        Some(b't') => "trg",
+        Some(b'q') => "qst",
+        // Caller messed up.
+        _ => return false,
+    };
+    let dir = g.lib_dir.join("world").join(prefix);
+
+    // A missing index.mini is not a failure; a missing index is.
+    if dir.join("index.mini").exists() && !strip_index_entry(g, &dir, "index.mini", znum) {
+        return false;
+    }
+    if !dir.join("index").exists() {
+        let msg = format!("SYSERR: OLC: Failed to open {}/index.", prefix);
+        g.mudlog(MudlogKind::Brf, LVL_IMPL, true, &msg);
+        return false;
+    }
+    strip_index_entry(g, &dir, "index", znum)
+}
+
 /// remove_room_zone_commands: drop every command in the
 /// zone that targets this room. `cmd_room` is deliberately *not* reset
 /// between iterations, so a command type it does not recognise

@@ -123,8 +123,8 @@ closed, mud time saved — so none of them loses a player:
 | `shutdown` | — | 0 | |
 | `shutdown die` | `.killscript` | 0 | |
 | `shutdown pause` | `pause` | 0 | |
-| `shutdown reboot` | `.fastboot` | 52 | skips the OLC pending-save flush |
-| `shutdown now` | — | 52 | skips the OLC pending-save flush |
+| `shutdown reboot` | `.fastboot` | starts itself again | skips the OLC pending-save flush |
+| `shutdown now` | — | starts itself again | skips the OLC pending-save flush |
 
 The one thing worth knowing before you type it: **`reboot` and `now` skip
 `save_all`**, the queue of world changes builders have made and not yet written
@@ -135,15 +135,21 @@ working, give them a minute to `save` first, or use plain `shutdown`.
 `now` is not more abrupt than `reboot`; the two differ only in that `reboot`
 leaves `.fastboot` behind.
 
-The files are signals for a supervising script and land **beside** the data
-directory — `.fastboot` next to `lib/`, not inside it. Exit code **52** is the
-same signal in the other channel: it means "start me again", and 0 means "stay
-down".
+`reboot` and `now` bring the game back on their own: once the shutdown
+sequence is done the server starts the binary on disk again, with the same
+arguments it was given, so a reboot after a rebuild is running the new build.
+On Linux the process is replaced in place, as the C's copyover does; on
+Windows a new process is started and the old one exits. Players see the
+disconnect and can log back in as soon as the world has loaded, typically a
+few seconds.
 
-**No autorun script ships with this.** If you want the game to come back by
-itself, a loop that restarts the binary while it exits 52, stops when it sees
-`.killscript`, and waits while `pause` exists is the whole of it. Delete
-`.fastboot` after acting on it, or the next restart reads it again.
+The files in the table are signals for a supervising script, if you run one,
+and land **beside** the data directory — `.fastboot` next to `lib/`, not
+inside it. **No autorun script ships with this**, and none is needed for a
+reboot; a loop only earns its keep for coming back from a crash. If you do
+run one, have it stop when it sees `.killscript`, wait while `pause` exists,
+and restart on any exit — exit code 52 is what you get when the server tried
+to start itself again and could not.
 
 ## Copyover
 

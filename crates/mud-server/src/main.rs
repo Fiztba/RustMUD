@@ -763,9 +763,59 @@ fn main() {
     drain_logs(&mut g, &mut logger);
     if g.circle_reboot != 0 {
         logger.log(g.now, "Rebooting.");
-        std::process::exit(52);
+        relaunch(&args, g.now, &mut logger);
     }
     logger.log(g.now, "Normal termination of game.");
+}
+
+/// `shutdown reboot` / `shutdown now`: start this binary again.
+///
+/// The C leaves this to its `autorun` script -- it exits 52 and trusts a
+/// loop outside the process to run it again. Nothing of the kind ships
+/// here, so a reboot has to bring the game back by itself, and it does so
+/// the way copyover does: on Unix the process image is replaced with a
+/// fresh run of the binary on disk (so a reboot after a rebuild loads the
+/// new build, as it does under autorun), and on Windows a successor is
+/// spawned and this process exits.
+///
+/// The arguments are the ones this process was started with, less any
+/// copyover handoff (`-C`): the successor binds its own listener. The
+/// working directory is inherited, so a relative `-d` still resolves.
+///
+/// Exit codes keep their documented meaning for anyone who does run a
+/// supervising loop: on Unix an exec never returns, so the loop sees
+/// nothing; on Windows a successful spawn exits 0, because the game is
+/// already back and a loop that restarted on 52 would start a second copy.
+/// 52 is reached only when the relaunch itself failed, which is the one
+/// case where outside help is still wanted.
+fn relaunch(args: &[String], now: i64, logger: &mut Logger) {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from(&args[0]));
+    let mut cmd = std::process::Command::new(&exe);
+    let mut skip = false;
+    for a in &args[1..] {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if let Some(rest) = a.strip_prefix("-C") {
+            skip = rest.is_empty();
+            continue;
+        }
+        cmd.arg(a);
+    }
+
+    if mud_sys::EXEC_IN_PLACE {
+        let err = mud_sys::exec(&mut cmd);
+        logger.log(now, &format!("SYSERR: reboot: exec: {}", err));
+        std::process::exit(52);
+    }
+    match cmd.spawn() {
+        Ok(_) => std::process::exit(0),
+        Err(e) => {
+            logger.log(now, &format!("SYSERR: reboot: spawn: {}", e));
+            std::process::exit(52);
+        }
+    }
 }
 
 /// Pass the log file on to the successor.

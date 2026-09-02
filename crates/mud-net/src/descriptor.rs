@@ -102,6 +102,11 @@ pub struct Descriptor {
     pub snooping: Option<usize>,
     pub snoop_by: Option<usize>,
 
+    /// The zone a `zdelete` report named and is waiting to be confirmed for.
+    /// It lives here so it dies with the connection, and so that the command
+    /// that deletes carries no zone number of its own.
+    pub zdelete_armed: Option<i32>,
+
     pub protocol: ProtocolState,
     /// Pulse at which the get_protocols event fires (ePROTOCOLS, +1.5 s).
     pub protocol_event_at: Option<u64>,
@@ -142,6 +147,7 @@ impl Descriptor {
             original: None,
             snooping: None,
             snoop_by: None,
+            zdelete_armed: None,
             protocol: ProtocolState::new(),
             protocol_event_at: None,
         }

@@ -2721,6 +2721,495 @@ pub fn do_peace(g: &mut Game, chid: CharId, _argument: &[u8], _cmd: usize, _subc
     }
 }
 
+/// The two fixed refusals, kept out of the body so the flow reads.
+const ZDELETE_SYNTAX: &[u8] = b"Syntax: zdelete <zone vnum>   what deleting it would cost\r\n        zdelete confirm      delete the zone that report named\r\n\r\nIt always takes both. Nothing is deleted by a command that has not first shown you what the deletion does, and the second command names no zone, so there is no number left to mistype.\r\n";
+const ZDELETE_NOTHING_ARMED: &[u8] = b"You have not been shown a zone to delete. Run zdelete <zone vnum> first, and read what it says.\r\n";
+const ZDELETE_CONFIRM_BARE: &[u8] = b"zdelete confirm takes nothing after it -- the zone is the one the report named, so that there is no number here to get wrong.\r\n";
+
+/// Has this zone been through zdelete?
+///
+/// The test is absence from the zone index, not the presence of a .deleted
+/// file: that is the invariant zdelete establishes, and the one thing nothing
+/// else undoes by accident. save_zone rewrites a .zon whenever a zone is
+/// saved or unlocked, so a file-pair test disarms itself the first time that
+/// happens; only create_world_index puts a line back. A zone still in the
+/// table but missing from the index is one deleted since the boot.
+fn zone_was_deleted(g: &Game, zvnum: i32) -> bool {
+    let idx = g.lib_dir.join("world").join("zon").join("index");
+    let Ok(data) = std::fs::read(&idx) else {
+        // Say so rather than quietly answering "not deleted": an unreadable
+        // zone index dooms the next boot anyway, but it should be heard from
+        // here and not from the reboot.
+        return false;
+    };
+    // Compare the number, not the text: every other reader of these files
+    // takes a token or scans a number, so padding is invisible to them -- and
+    // the recovery zdelete prints has the operator editing them by hand.
+    for line in data.split(|&b| b == b'\n') {
+        let mut line = line.to_vec();
+        while matches!(line.last(), Some(b'\r') | Some(b' ')) {
+            line.pop();
+        }
+        if line.first() == Some(&b'$') {
+            break;
+        }
+        if !line.is_empty() && atoi(&line) == zvnum {
+            return false;
+        }
+    }
+    true
+}
+
+/// Who, if anyone, has an editor open on this zone.
+fn zdelete_editor_open(g: &Game, zrnum: usize) -> Option<Vec<u8>> {
+    for (&di, olc) in g.olc.iter() {
+        if olc.zone_num != zrnum as i32 {
+            continue;
+        }
+        let name = g
+            .descriptors
+            .get(di)
+            .and_then(|d| d.character)
+            .and_then(|c| g.try_ch(c))
+            .map(|c| c.get_name().to_vec())
+            .unwrap_or_else(|| b"Someone".to_vec());
+        return Some(name);
+    }
+    None
+}
+
+/// Everything the deletion costs, printed before anything is touched. This is
+/// the only place any of it is ever said: after the reboot the exits are
+/// simply gone, and the SYSERRs name vnums rather than the zone that took
+/// them with it.
+fn zdelete_report(g: &mut Game, chid: CharId, zrnum: usize, zvnum: i32, n: [usize; 6]) {
+    let s = |v: usize| if v == 1 { "" } else { "s" };
+    let zname = String::from_utf8_lossy(
+        &g.world.zones[zrnum].name.clone().unwrap_or_default(),
+    )
+    .into_owned();
+    let mut out = format!("Zone {}: {}\r\n", zvnum, zname).into_bytes();
+    out.extend_from_slice(
+        format!(
+            "  {} room{}, {} mobile{}, {} object{}, {} trigger{}, {} shop{}, {} quest{}\r\n",
+            n[0], s(n[0]), n[1], s(n[1]), n[2], s(n[2]),
+            n[3], s(n[3]), n[4], s(n[4]), n[5], s(n[5])
+        )
+        .as_bytes(),
+    );
+
+    // Exits leading in. After the reboot they resolve nowhere: they stop being
+    // listed, cannot be walked, and nothing says why.
+    let mut inbound = 0usize;
+    let mut listed = 0usize;
+    for i in 0..g.world.rooms.len() {
+        if g.world.rooms[i].zone as usize == zrnum {
+            continue;
+        }
+        for door in 0..NUM_OF_DIRS {
+            let Some(ex) = g.world.rooms[i].dir_option[door].as_ref() else {
+                continue;
+            };
+            let to = ex.to_room_vnum;
+            if to < 0 || g.real_room(to).is_none() {
+                continue;
+            }
+            let tr = g.real_room(to).unwrap();
+            if g.world.rooms[tr as usize].zone as usize != zrnum {
+                continue;
+            }
+            if inbound == 0 {
+                out.extend_from_slice(
+                    b"\r\nExits leading into it, which will become dead ends with no message:\r\n",
+                );
+            }
+            inbound += 1;
+            if listed < 20 {
+                listed += 1;
+                let from_zone = g.world.zones[g.world.rooms[i].zone as usize].number;
+                out.extend_from_slice(
+                    format!(
+                        "  zone {:<4} room {:<6} {:<5} -> {}\r\n",
+                        from_zone,
+                        g.world.rooms[i].vnum,
+                        mud_data::tables::DIRS[door],
+                        to
+                    )
+                    .as_bytes(),
+                );
+            }
+        }
+    }
+    if inbound > listed {
+        out.extend_from_slice(format!("  ... and {} more.\r\n", inbound - listed).as_bytes());
+    }
+    if inbound == 0 {
+        out.extend_from_slice(b"\r\nNo exits lead into it.\r\n");
+    }
+
+    // Triggers are the second way out of the zone, and a noisier one: a
+    // prototype elsewhere that attaches one logs a SYSERR on every boot.
+    let mut attached = 0usize;
+    let mut owners = 0usize;
+    let count = |g: &Game, scripts: &[Idx], own: &mut usize, att: &mut usize| {
+        let mut hit = false;
+        for &t in scripts {
+            if real_zone_by_thing(g, t as i32) == Some(zrnum) {
+                *att += 1;
+                if !hit {
+                    hit = true;
+                    *own += 1;
+                }
+            }
+        }
+    };
+    for i in 0..g.world.rooms.len() {
+        if g.world.rooms[i].zone as usize == zrnum {
+            continue;
+        }
+        let sc = g.world.rooms[i].proto_script.clone();
+        count(g, &sc, &mut owners, &mut attached);
+    }
+    for i in 0..g.world.mob_protos.len() {
+        if real_zone_by_thing(g, g.world.mob_protos[i].vnum as i32) == Some(zrnum) {
+            continue;
+        }
+        let sc = g.world.mob_protos[i].proto_script.clone();
+        count(g, &sc, &mut owners, &mut attached);
+    }
+    for i in 0..g.world.obj_protos.len() {
+        if real_zone_by_thing(g, g.world.obj_protos[i].vnum as i32) == Some(zrnum) {
+            continue;
+        }
+        let sc = g.world.obj_protos[i].proto_script.clone();
+        count(g, &sc, &mut owners, &mut attached);
+    }
+    if attached > 0 {
+        out.extend_from_slice(
+            format!(
+                "{} trigger attachment{} on {} thing{} outside the zone name a trigger inside it; each attachment logs a SYSERR at every boot.\r\n",
+                attached, s(attached), owners, s(owners)
+            )
+            .as_bytes(),
+        );
+    }
+
+    // Reset commands live in the zone file of the zone that runs them, so
+    // another zone loading this one's mobs or objects keeps trying.
+    let mut resets = 0usize;
+    for z in 0..g.world.zones.len() {
+        if z == zrnum {
+            continue;
+        }
+        for c in 0..g.world.zones[z].cmds.len() {
+            if zdelete_cmd_touches(g, zrnum, z, c) {
+                resets += 1;
+            }
+        }
+    }
+    if resets > 0 {
+        out.extend_from_slice(
+            format!(
+                "{} reset command{} in other zones load{} something from this one; each is a SYSERR at every boot.\r\n",
+                resets, s(resets), if resets == 1 { "s" } else { "" }
+            )
+            .as_bytes(),
+        );
+    }
+
+    // The counts above are prototypes. The instances are what players own.
+    if n[2] > 0 {
+        let carried = g
+            .object_list
+            .iter()
+            .filter(|&&oid| {
+                g.try_obj(oid).is_some_and(|o| {
+                    let r = o.item_number as usize;
+                    r < g.world.obj_protos.len()
+                        && real_zone_by_thing(g, g.world.obj_protos[r].vnum as i32) == Some(zrnum)
+                })
+            })
+            .count();
+        out.extend_from_slice(
+            format!(
+                "\r\nEvery object of this zone is destroyed by the reboot -- {} of them exist right now, and so is every copy in a player file, rent file or house. The player is not told; the item is dropped as it loads.\r\n",
+                carried
+            )
+            .as_bytes(),
+        );
+    }
+
+    // character_list, not the descriptors: a linkless body is still standing
+    // in the zone and is the one player who cannot be told anything at all.
+    let players = g
+        .character_list
+        .iter()
+        .filter(|&&id| {
+            g.try_ch(id).is_some_and(|c| {
+                !c.is_npc()
+                    && c.in_room != NOWHERE
+                    && g.world.rooms[c.in_room as usize].zone as usize == zrnum
+            })
+        })
+        .count();
+    if players > 0 {
+        out.extend_from_slice(
+            format!(
+                "{} player{} standing in it; they will be moved to a start room by the reboot.\r\n",
+                players,
+                if players == 1 { " is" } else { "s are" }
+            )
+            .as_bytes(),
+        );
+    }
+
+    out.extend_from_slice(
+        b"\r\nThe zone's files are set aside, not erased, and nothing in memory moves: it is gone at the next reboot.\r\nTo go through with it, the next command is just:  zdelete confirm\r\n",
+    );
+    send_to_char(g, chid, &out);
+}
+
+/// Does one of this reset command's arguments name something the zone owns?
+/// Such a command lives in another zone's file, so it survives the deletion
+/// and logs a zone-file SYSERR on every boot afterwards.
+fn zdelete_cmd_touches(g: &Game, zrnum: usize, z: usize, c: usize) -> bool {
+    let cmd = &g.world.zones[z].cmds[c];
+    // renum converted these to rnums at boot, so each is an index; a command
+    // whose lookup failed holds a sentinel, hence the bounds tests.
+    let mob = |r: i32| {
+        r >= 0
+            && (r as usize) < g.world.mob_protos.len()
+            && real_zone_by_thing(g, g.world.mob_protos[r as usize].vnum as i32) == Some(zrnum)
+    };
+    let obj = |r: i32| {
+        r >= 0
+            && (r as usize) < g.world.obj_protos.len()
+            && real_zone_by_thing(g, g.world.obj_protos[r as usize].vnum as i32) == Some(zrnum)
+    };
+    let room = |r: i32| {
+        r >= 0
+            && (r as usize) < g.world.rooms.len()
+            && g.world.rooms[r as usize].zone as usize == zrnum
+    };
+    let trg = |r: i32| {
+        r >= 0
+            && (r as usize) < g.world.triggers.len()
+            && real_zone_by_thing(g, g.world.triggers[r as usize].vnum as i32) == Some(zrnum)
+    };
+    match cmd.command {
+        b'M' => mob(cmd.arg1) || room(cmd.arg3),
+        b'O' => obj(cmd.arg1) || room(cmd.arg3),
+        b'G' | b'E' => obj(cmd.arg1),
+        b'P' => obj(cmd.arg1) || obj(cmd.arg3),
+        b'D' => room(cmd.arg1),
+        b'R' => room(cmd.arg1) || obj(cmd.arg2),
+        b'T' => trg(cmd.arg2) || room(cmd.arg3),
+        b'V' => room(cmd.arg3),
+        _ => false,
+    }
+}
+
+/// zdelete: take a zone out of the world.
+///
+/// The zone's files are set aside and its lines come out of each world index
+/// and index.mini, so the next boot does not read it. Nothing in memory moves:
+/// the rooms, mobiles and objects the running game holds stay where they are
+/// and every rnum in play stays valid. Removing the members one at a time
+/// instead would renumber everything above them, on a running MUD, for a zone
+/// that is going away at the reboot regardless.
+///
+/// It always takes two commands, and the second names no zone. The first
+/// reports and arms; the second deletes what that report named. A report
+/// stands for exactly one command: the interpreter cancels it for anything
+/// that is not zdelete, and this function ends it on every path but a fresh
+/// report, so a confirmation can only ever land on the zone its operator was
+/// looking at when they typed it.
+pub fn do_zdelete(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd: i32) {
+    const WORLD_FILES: [&str; 7] = ["wld", "mob", "obj", "zon", "shp", "qst", "trg"];
+
+    let (arg, rest) = one_argument(argument);
+    let (arg2, _) = one_argument(rest);
+
+    // Take the standing report away first; one goes back only where a fresh
+    // report is printed below.
+    let di = g.ch(chid).desc;
+    let was_armed = di.and_then(|d| g.descriptors.get(d).and_then(|x| x.zdelete_armed));
+    if let Some(d) = di {
+        if let Some(x) = g.descriptors.get_mut(d) {
+            x.zdelete_armed = None;
+        }
+    }
+    let confirming = arg.eq_ignore_ascii_case(b"confirm");
+    if let Some(z) = was_armed {
+        if !confirming {
+            let m = format!("The pending deletion of zone {} is cancelled.\r\n", z);
+            send_to_char(g, chid, m.as_bytes());
+        }
+    }
+
+    if arg.is_empty() {
+        send_to_char(g, chid, ZDELETE_SYNTAX);
+        return;
+    }
+
+    let zvnum: i32;
+    if confirming {
+        if !arg2.is_empty() {
+            send_to_char(g, chid, ZDELETE_CONFIRM_BARE);
+            if let Some(z) = was_armed {
+                let m = format!("The pending deletion of zone {} is cancelled; run zdelete {} again if you meant it.\r\n", z, z);
+                send_to_char(g, chid, m.as_bytes());
+            }
+            return;
+        }
+        let Some(z) = was_armed else {
+            send_to_char(g, chid, ZDELETE_NOTHING_ARMED);
+            return;
+        };
+        zvnum = z;
+    } else {
+        if !arg2.is_empty() {
+            let m = format!("zdelete takes the zone on its own. Run zdelete {} to see what deleting it would cost, then zdelete confirm to go through with it.\r\n", String::from_utf8_lossy(&arg));
+            send_to_char(g, chid, m.as_bytes());
+            return;
+        }
+        // A word would otherwise come back as zone 0 and report on the void.
+        if !arg.first().is_some_and(|c| c.is_ascii_digit()) {
+            let m = format!("There is no zone {}.\r\n", String::from_utf8_lossy(&arg));
+            send_to_char(g, chid, m.as_bytes());
+            return;
+        }
+        zvnum = atoi(&arg);
+    }
+
+    let Some(zrnum) = g.world.zones.iter().position(|z| z.number as i32 == zvnum) else {
+        let m = if confirming {
+            format!("Zone {} is gone already.\r\n", zvnum)
+        } else {
+            format!("There is no zone {}.\r\n", zvnum)
+        };
+        send_to_char(g, chid, m.as_bytes());
+        return;
+    };
+
+    // A zone holding a start room cannot go: the next boot would have nowhere
+    // to put anyone who was not already somewhere valid.
+    let starts = [
+        g.config.mortal_start_room,
+        g.config.immort_start_room,
+        g.config.frozen_start_room,
+        0,
+    ];
+    if starts.iter().any(|&v| {
+        g.real_room(v)
+            .is_some_and(|r| g.world.rooms[r as usize].zone as usize == zrnum)
+    }) {
+        let m = format!(
+            "Zone {} holds a start room. Move the start rooms in cedit first.\r\n",
+            zvnum
+        );
+        send_to_char(g, chid, m.as_bytes());
+        return;
+    }
+
+    let rooms = g.world.rooms.iter().filter(|r| r.zone as usize == zrnum).count();
+    let mob_v: Vec<i32> = g.world.mob_protos.iter().map(|m| m.vnum as i32).collect();
+    let obj_v: Vec<i32> = g.world.obj_protos.iter().map(|o| o.vnum as i32).collect();
+    let trg_v: Vec<i32> = g.world.triggers.iter().map(|t| t.vnum as i32).collect();
+    let shp_v: Vec<i32> = g.world.shops.iter().map(|s| s.vnum as i32).collect();
+    let qst_v: Vec<i32> = g.world.quests.iter().map(|q| q.vnum as i32).collect();
+    let inz = |v: &i32| real_zone_by_thing(g, *v) == Some(zrnum);
+    let counts = [
+        rooms,
+        mob_v.iter().filter(|v| inz(v)).count(),
+        obj_v.iter().filter(|v| inz(v)).count(),
+        trg_v.iter().filter(|v| inz(v)).count(),
+        shp_v.iter().filter(|v| inz(v)).count(),
+        qst_v.iter().filter(|v| inz(v)).count(),
+    ];
+
+    if !confirming {
+        zdelete_report(g, chid, zrnum, zvnum, counts);
+        if let Some(d) = di {
+            if let Some(x) = g.descriptors.get_mut(d) {
+                x.zdelete_armed = Some(zvnum);
+            }
+        }
+        return;
+    }
+
+    // NOBUILD below stops anyone entering an editor on the zone, but it cannot
+    // reach one that is already open: that save writes the files right back.
+    if let Some(who) = zdelete_editor_open(g, zrnum) {
+        let mut out = who;
+        out.extend_from_slice(
+            format!(" has an editor open on zone {}. A save from it would write the zone's files back after this; have them leave the editor first.\r\n", zvnum).as_bytes(),
+        );
+        send_to_char(g, chid, &out);
+        return;
+    }
+
+    // An earlier deletion's files are not ours to overwrite: a rename would
+    // replace them without a word, and what they hold is the only copy of a
+    // zone somebody already deleted once.
+    for ext in WORLD_FILES {
+        let p = g
+            .lib_dir
+            .join("world")
+            .join(ext)
+            .join(format!("{}.{}.deleted", zvnum, ext));
+        if p.exists() {
+            let m = format!("world/{}/{}.{}.deleted is already there from an earlier deletion.\r\nMove it aside first; this would overwrite it.\r\n", ext, zvnum, ext);
+            send_to_char(g, chid, m.as_bytes());
+            return;
+        }
+    }
+
+    let mut moved = 0usize;
+    for ext in WORLD_FILES {
+        // Index first, and only rename if it worked: an index naming a file
+        // that is gone stops the next boot dead, while a file that no index
+        // names is simply never read.
+        if !crate::olc::genzon::remove_world_index(g, zvnum, ext) {
+            let had = if moved == 1 { " has" } else { "s have" };
+            let m = format!("Could not rewrite the {} index files -- see the syslog.\r\nZone {} is now only partly deleted: {} file{} already been set aside and world/{}/{}.{} was left in place. The world still boots, because a file no index names is never read. Put it right by hand before trying again.\r\n", ext, zvnum, moved, had, ext, zvnum, ext);
+            send_to_char(g, chid, m.as_bytes());
+            return;
+        }
+        let dir = g.lib_dir.join("world").join(ext);
+        // Not every zone has all seven; a missing one is nothing to report.
+        let from = dir.join(format!("{}.{}", zvnum, ext));
+        let to = dir.join(format!("{}.{}.deleted", zvnum, ext));
+        if std::fs::rename(from, to).is_ok() {
+            moved += 1;
+        }
+    }
+
+    // The zone is still in memory, so every editor still works on it and a
+    // save would write its file back -- unindexed for most types, but the
+    // shop and quest writers re-index too. NOBUILD is what can_edit_zone
+    // already honours; the pending saves go because the save-list flush at
+    // saveall and at shutdown does not consult it.
+    set_zone_flag(g, zrnum, flags::ZONE_NOBUILD, true);
+    g.save_list.retain(|&(z, _)| z as i32 != zvnum);
+
+    let who = String::from_utf8_lossy(g.ch(chid).get_name()).into_owned();
+    let invis = g.ch(chid).invis_lev();
+    let zname =
+        String::from_utf8_lossy(&g.world.zones[zrnum].name.clone().unwrap_or_default()).into_owned();
+    let s = |v: usize| if v == 1 { "" } else { "s" };
+    let m = format!(
+        "(GC) {} has deleted zone {} ({}): {} file{} set aside, {} room{}, {} mobile{}, {} object{}.",
+        who, zvnum, zname, moved, s(moved), counts[0], s(counts[0]),
+        counts[1], s(counts[1]), counts[2], s(counts[2])
+    );
+    g.mudlog(MudlogKind::Brf, LVL_GOD.max(invis as u8), true, &m);
+
+    let was = if moved == 1 { " was" } else { "s were" };
+    let m = format!("Zone {} is out of the world index; {} file{} set aside as <name>.deleted, and the zone is now NOBUILD so that no editor writes it back.\r\nIt stays loaded until the next reboot.\r\nTo put it back: rename those files to their original names, and add each one to its index -- and to its index.mini if it was listed there -- in ASCENDING numeric order. The index order is the order the tables are built in, and they are binary-searched, so a line appended at the end loads the zone but leaves parts of the world unreachable.\r\n", zvnum, moved, was);
+    send_to_char(g, chid, m.as_bytes());
+}
+
 pub fn do_zpurge(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd: i32) {
     let (arg, _) = one_argument(argument);
     let mut zone = 0usize;
@@ -2987,6 +3476,16 @@ pub fn do_zunlock(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _sub
             if !zone_flagged(g, zn, flags::ZONE_NOBUILD) {
                 continue;
             }
+            // A deleted zone is locked too, and save_zone below would write
+            // its .zon back with nothing in the index naming it. Skip it here
+            // as the single-zone form refuses it, or "unlock every zone"
+            // quietly undoes part of a deletion nobody mentioned.
+            if zone_was_deleted(g, g.world.zones[zn].number as i32) {
+                let m = format!("Zone {} has been deleted; leaving it locked.\r\n",
+                                g.world.zones[zn].number);
+                send_to_char(g, chid, m.as_bytes());
+                continue;
+            }
             counter += 1;
             set_zone_flag(g, zn, flags::ZONE_NOBUILD, false);
             if crate::db::save_zone(g, zn) {
@@ -3051,6 +3550,14 @@ pub fn do_zunlock(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _sub
     }
     if !zone_flagged(g, zn, flags::ZONE_NOBUILD) {
         send_to_char(g, chid, format!("Zone {} is already unlocked!\r\n", znvnum).as_bytes());
+        return;
+    }
+        // A zone that zdelete took out of the world is locked as well, and
+    // unlocking it would write its .zon straight back -- save_zone below does
+    // exactly that -- leaving a file the index no longer names.
+    if zone_was_deleted(g, znvnum) {
+        let m = format!("Zone {} has been deleted -- it is no longer in the zone index.\r\nUnlocking it would write its .zon back with nothing naming it, and reopen it to every editor. Restore the zone first.\r\n", znvnum);
+        send_to_char(g, chid, m.as_bytes());
         return;
     }
     set_zone_flag(g, zn, flags::ZONE_NOBUILD, false);

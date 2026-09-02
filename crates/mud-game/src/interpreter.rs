@@ -461,6 +461,7 @@ pub fn base_command_table() -> Vec<CommandEntry> {
     row(b"zunlock", b"zunlock", POS_DEAD_C, f(do_zunlock), LVL_GOD, 0);
     row(b"zcheck", b"zcheck", POS_DEAD_C, f(crate::act::wizard::do_zcheck), LVL_BUILDER, 0);
     row(b"zpurge", b"zpurge", POS_DEAD_C, f(do_zpurge), LVL_BUILDER, 0);
+    row(b"zdelete", b"zdelete", POS_DEAD_C, f(crate::act::wizard::do_zdelete), LVL_IMPL, 0);
     t
 }
 
@@ -719,6 +720,26 @@ pub fn command_interpreter(g: &mut Game, chid: CharId, argument: &[u8]) {
                 found = Some(idx);
                 break;
             }
+        }
+    }
+
+    // A zdelete report stands for exactly one command. Every command other
+    // than zdelete cancels it here; zdelete cannot be cancelled here, because
+    // that would cancel the confirmation it exists to allow, so do_zdelete
+    // ends its own report on every path but a fresh one. Between the two, a
+    // confirmation can only ever land on the zone the operator was looking at.
+    let is_zdelete = found.is_some_and(|i| g.commands[i].command == b"zdelete");
+    if !is_zdelete {
+        let di = g.ch(chid).desc;
+        let armed = di.and_then(|d| g.descriptors.get(d).and_then(|x| x.zdelete_armed));
+        if let Some(z) = armed {
+            if let Some(d) = di {
+                if let Some(x) = g.descriptors.get_mut(d) {
+                    x.zdelete_armed = None;
+                }
+            }
+            let m = format!("The pending deletion of zone {} is cancelled.\r\n", z);
+            crate::comm::send_to_char(g, chid, m.as_bytes());
         }
     }
 
