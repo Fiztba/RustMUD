@@ -52,3 +52,36 @@ fn failed_rewrite_preserves_mail_and_does_not_deliver_it() {
     assert!(result.is_none());
     assert_eq!(std::fs::read(&path).unwrap(), original);
 }
+
+#[test]
+fn successful_delivery_removes_only_the_selected_letter() {
+    let mut f = fixture("successful-delivery");
+    let path = f.game.lib_dir.join("etc/plrmail");
+    let original = b"### 1 2 3\nfirst~\n### 9 2 3\nother~\n### 1 2 3\nsecond~\n";
+    std::fs::write(&path, original).unwrap();
+    assert!(mail::read_delete(&mut f.game, 42).is_none());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    assert!(mail::read_delete(&mut f.game, 1).unwrap().ends_with(b"first"));
+    assert_eq!(std::fs::read(&path).unwrap(), b"### 9 2 3\nother~\n### 1 2 3\nsecond~\n");
+    assert!(mail::read_delete(&mut f.game, 1).unwrap().ends_with(b"second"));
+    assert!(mail::read_delete(&mut f.game, 1).is_none());
+    assert!(mail::read_delete(&mut f.game, 9).unwrap().ends_with(b"other"));
+    assert!(std::fs::read(&path).unwrap().is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn failed_windows_replacement_preserves_the_original() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let mut f = fixture("locked-replacement");
+    let path = f.game.lib_dir.join("etc/plrmail");
+    let original = b"### 1 2 3\nvaluable mail~\n";
+    std::fs::write(&path, original).unwrap();
+    // Permit the parser to read, but deny replacement of the open file.
+    let lock = std::fs::OpenOptions::new().read(true).share_mode(1).open(&path).unwrap();
+    assert!(mail::has_mail(&mut f.game, 1));
+    assert!(mail::read_delete(&mut f.game, 1).is_none());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    drop(lock);
+    assert!(mail::read_delete(&mut f.game, 1).unwrap().ends_with(b"valuable mail"));
+}
