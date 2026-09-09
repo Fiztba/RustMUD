@@ -47,4 +47,18 @@ fn rejected_wait_does_not_leave_a_trigger_running_forever() {
     assert_eq!(g.trig(go, iid).unwrap().wait_event, None);
     assert_eq!(g.dg_script_depth, 0);
     assert_eq!(dg::driver::script_driver(g, go, iid, dg::TRIG_NEW), 7);
+
+    g.world.triggers[nr as usize].cmdlist = vec![
+        b"wait 1".to_vec(), b"set resumed yes".to_vec(), b"global resumed".to_vec(),
+    ];
+    dg::driver::script_driver(g, go, iid, dg::TRIG_NEW);
+    let event = g.trig(go, iid).unwrap().wait_event.expect("valid wait must schedule");
+    assert_eq!(g.trig(go, iid).unwrap().depth, 1);
+    assert!(g.script_of(go).unwrap().global_vars.is_empty());
+    assert_eq!(g.dg_script_depth, 0);
+    dg::driver::trig_wait_event(g, go, iid, event);
+    assert_eq!(g.trig(go, iid).unwrap().depth, 0);
+    assert_eq!(g.trig(go, iid).unwrap().wait_event, None);
+    assert_eq!(g.script_of(go).unwrap().global_vars[0].value, b"yes");
+    assert_eq!(g.dg_script_depth, 0);
 }
