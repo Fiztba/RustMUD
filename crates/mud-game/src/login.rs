@@ -586,6 +586,18 @@ fn perform_dupe_check(g: &mut Game, di: usize) -> bool {
         let char_match = od.character.and_then(|c| g.try_ch(c)).is_some_and(|c| c.idnum == id);
         if orig_match {
             let orig = g.descriptors.get(odi).unwrap().original;
+            // The borrowed body remains in the world. Detach it before
+            // closing this descriptor, whose Close state frees its character.
+            let body = g.descriptors.get(odi).unwrap().character;
+            if let Some(body) = body {
+                if let Some(ch) = g.chars.get_mut(body) {
+                    ch.desc = None;
+                }
+            }
+            if let Some(od) = g.descriptors.get_mut(odi) {
+                od.character = None;
+                od.original = None;
+            }
             write_desc(g, odi, b"\r\nMultiple login detected -- disconnecting.\r\n");
             set_state(g, odi, ConState::Close);
             if target.is_none() {
@@ -595,11 +607,10 @@ fn perform_dupe_check(g: &mut Game, di: usize) -> bool {
         } else if char_match {
             let od = g.descriptors.get(odi).unwrap();
             if od.original.is_some() {
-                // Someone (an imm) switched INTO this body: do_return is
-                // stage 8; sever the link.
-                let odc = od.character;
-                if let Some(odc) = odc {
-                    let _ = odc;
+                // Return the immortal to their own body; phase 2 can then
+                // reconnect the player to the body they already have.
+                if let Some(body) = od.character {
+                    crate::act::wizard::return_to_char(g, body);
                 }
             } else {
                 if od.state == ConState::Playing && target.is_none() {
