@@ -35,26 +35,20 @@ fn mail_file_tmp(g: &Game) -> std::path::PathBuf {
     g.lib_dir.join("etc").join("plrmail_tmp")
 }
 
-/// read_mail_record. `None` at EOF *or* on a malformed header — reading
-/// stops either way.
-fn read_mail_record(r: &mut Reader, log: &mut Vec<String>) -> Option<MailRecord> {
-    let line = r.get_line()?;
+/// Distinguish clean EOF from corruption so callers never rewrite a partial mailbox.
+fn read_mail_record(r: &mut Reader) -> Result<Option<MailRecord>, String> {
+    let Some(line) = r.get_line() else { return Ok(None) };
     let fields: Vec<&[u8]> = line.split(|b| *b == b' ').filter(|f| !f.is_empty()).collect();
     let parse = |b: &[u8]| -> Option<i64> { std::str::from_utf8(b).ok()?.trim().parse().ok() };
-    if fields.len() < 4 || fields[0] != b"###" {
-        log.push("Mail system - fatal error - malformed mail header".to_string());
-        log.push(format!("Line was: {}", String::from_utf8_lossy(&line)));
-        return None;
+    let malformed = || format!("Mail system - malformed mail header: {}", String::from_utf8_lossy(&line));
+    if fields.len() != 4 || fields[0] != b"###" {
+        return Err(malformed());
     }
     let (Some(recipient), Some(sender), Some(sent_time)) =
         (parse(fields[1]), parse(fields[2]), parse(fields[3]))
-    else {
-        log.push("Mail system - fatal error - malformed mail header".to_string());
-        log.push(format!("Line was: {}", String::from_utf8_lossy(&line)));
-        return None;
-    };
-    let body = r.fread_string("read mail record").ok().flatten();
-    Some(MailRecord { recipient, sender, sent_time, body })
+    else { return Err(malformed()); };
+    let body = r.fread_string("read mail record")?;
+    Ok(Some(MailRecord { recipient, sender, sent_time, body }))
 }
 
 fn write_mail_record(out: &mut Vec<u8>, rec: &MailRecord) {
@@ -67,16 +61,17 @@ fn write_mail_record(out: &mut Vec<u8>, rec: &MailRecord) {
 
 fn read_all(g: &mut Game) -> Option<Vec<MailRecord>> {
     let data = std::fs::read(mail_file(g)).ok()?;
-    let mut log = Vec::new();
     let mut out = Vec::new();
-    {
-        let mut r = Reader::new(&data);
-        while let Some(rec) = read_mail_record(&mut r, &mut log) {
-            out.push(rec);
+    let mut r = Reader::new(&data);
+    loop {
+        match read_mail_record(&mut r) {
+            Ok(Some(rec)) => out.push(rec),
+            Ok(None) => break,
+            Err(error) => {
+                g.log(error);
+                return None;
+            }
         }
-    }
-    for line in log {
-        g.log(line);
     }
     Some(out)
 }
@@ -133,10 +128,10 @@ pub fn store_mail(g: &mut Game, to: i64, from: i64, message: Vec<u8>) {
 
 /// read_delete: pull the first message for `recipient`,
 /// rewriting the file without it, and render it as the note's text.
-pub fn read_delete(g: &mut Game, recipient: i64) -> Vec<u8> {
+pub fn read_delete(g: &mut Game, recipient: i64) -> Option<Vec<u8>> {
     let Some(all) = read_all(g) else {
         g.log("read_delete: Mail file not accessible.".to_string());
-        return b"Mail system malfunction - please report this".to_vec();
+        return None;
     };
 
     let mut keep: Option<MailRecord> = None;
@@ -150,7 +145,7 @@ pub fn read_delete(g: &mut Game, recipient: i64) -> Vec<u8> {
     }
 
     let buf = match &keep {
-        None => b"Mail system error - please report".to_vec(),
+        None => return None,
         Some(rec) => {
             let timestr = crate::act::wizard::ctime_like(rec.sent_time, g.tz_offset_secs);
             let from = crate::players_glue::get_name_by_id(g, rec.sender);
@@ -171,16 +166,16 @@ pub fn read_delete(g: &mut Game, recipient: i64) -> Vec<u8> {
     for rec in &rest {
         write_mail_record(&mut out, rec);
     }
-    // Survivors go to plrmail_tmp, then plrmail is removed and the temp
-    // renamed over it. The temp file is left behind only on failure.
+    // Deliver only after the replacement succeeds. Renaming over the old
+    // file preserves it if replacement fails, including on Windows.
     let tmp = mail_file_tmp(g);
-    if std::fs::write(&tmp, &out).is_ok() {
-        let _ = std::fs::remove_file(mail_file(g));
-        let _ = std::fs::rename(&tmp, mail_file(g));
-    } else {
-        g.log("read_delete: new Mail file not accessible.".to_string());
+    if let Err(error) = std::fs::write(&tmp, &out)
+        .and_then(|()| std::fs::rename(&tmp, mail_file(g)))
+    {
+        g.log(format!("read_delete: could not replace Mail file: {error}"));
+        return None;
     }
-    buf
+    Some(buf)
 }
 
 pub fn notify_if_playing(g: &mut Game, from: CharId, recipient_id: i64) {
@@ -334,7 +329,10 @@ fn postmaster_receive_mail(g: &mut Game, chid: CharId, mailman: CharId) {
         return;
     }
     while has_mail(g, id) {
-        let text = read_delete(g, id);
+        let Some(text) = read_delete(g, id) else {
+            send_to_char(g, chid, b"Mail system malfunction - please report this.\r\n");
+            break;
+        };
         let mut obj = crate::obj::create_obj();
         obj.item_number = 1;
         obj.name = Some(b"mail paper letter".to_vec());
