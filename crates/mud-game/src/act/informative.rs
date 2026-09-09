@@ -2147,7 +2147,7 @@ pub fn do_levels(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subc
             match (a.parse::<i32>(), b.parse::<i32>()) {
                 (Ok(x), Ok(y)) if x > 0 && y > 0 && x <= y && x < LVL_IMMORT as i32 => {
                     min_lev = x;
-                    max_lev = (y + 1).min(LVL_IMMORT as i32);
+                    max_lev = y.min(LVL_IMMORT as i32 - 1) + 1;
                 }
                 _ => {
                     send_to_char(g, chid, b"Usage: levels [<min>-<max> | <level>]\r\n");
