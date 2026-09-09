@@ -230,6 +230,9 @@ pub struct ProtocolState {
     pub vars: Vec<MsdpVal>,
     /// Per-descriptor subneg accumulator (see module doc for the F2 fix).
     iac_buf: Vec<u8>,
+    /// An IAC or option command awaiting its next byte from the stream.
+    iac_pending: bool,
+    option_pending: Option<u8>,
     /// Bytes the protocol layer wants sent (negotiation responses etc.).
     /// The descriptor layer drains this through its normal Write path.
     pub out: Vec<u8>,
@@ -281,6 +284,8 @@ impl ProtocolState {
             last_ttype: None,
             vars,
             iac_buf: Vec::new(),
+            iac_pending: false,
+            option_pending: None,
             out: Vec::new(),
         }
     }
@@ -378,41 +383,55 @@ pub fn protocol_input(p: &mut ProtocolState, data: &[u8], output_empty: bool) ->
     let mut i = 0usize;
     while i < data.len() {
         let b = data[i];
-        if b == IAC && i + 1 < data.len() && data[i + 1] == IAC {
-            if p.iac_mode {
-                p.iac_buf.push(IAC);
-            } else {
-                r.in_band.push(IAC);
-            }
-            i += 2;
+        if let Some(cmd) = p.option_pending.take() {
+            perform_handshake(p, cmd, b, &mut r.bugs, output_empty);
+            i += 1;
             continue;
         }
         if p.iac_mode {
-            // Inside subnegotiation: collect until IAC SE.
-            if b == IAC && i + 1 < data.len() && data[i + 1] == SE {
-                let buf = std::mem::take(&mut p.iac_buf);
-                if buf.len() >= 2 {
-                    perform_subnegotiation(p, buf[0], &buf[1..], &mut r.bugs, output_empty);
-                } else if buf.len() == 1 {
-                    perform_subnegotiation(p, buf[0], &[], &mut r.bugs, output_empty);
+            if p.iac_pending {
+                p.iac_pending = false;
+                if b == SE {
+                    let buf = std::mem::take(&mut p.iac_buf);
+                    if let Some((&option, data)) = buf.split_first() {
+                        perform_subnegotiation(p, option, data, &mut r.bugs, output_empty);
+                    }
+                    p.iac_mode = false;
+                    i += 1;
+                    continue;
                 }
-                p.iac_mode = false;
-                i += 2;
-                continue;
-            }
-            if b == IAC {
-                // Lone IAC inside subneg with an unknown follow byte:
-                // accumulate the byte.
-                p.iac_buf.push(b);
+                // IAC IAC represents one data byte. Preserve an unexpected
+                // IAC followed by another byte, subject to the same cap.
+                if b != IAC && !push_subneg_byte(p, IAC, &mut r) {
+                    return r;
+                }
+            } else if b == IAC {
+                p.iac_pending = true;
                 i += 1;
                 continue;
             }
-            if p.iac_buf.len() >= mud_data::types::MAX_RAW_INPUT_LENGTH {
-                r.bugs.push("ProtocolInput: Too much incoming data to store in the buffer.\n".into());
-                r.fatal = true;
+            if !push_subneg_byte(p, b, &mut r) {
                 return r;
             }
-            p.iac_buf.push(b);
+            i += 1;
+            continue;
+        }
+        if p.iac_pending {
+            p.iac_pending = false;
+            match b {
+                IAC => r.in_band.push(IAC),
+                SB => {
+                    p.iac_mode = true;
+                    p.iac_buf.clear();
+                }
+                DO | DONT | WILL | WONT => p.option_pending = Some(b),
+                _ => {}
+            }
+            i += 1;
+            continue;
+        }
+        if b == IAC {
+            p.iac_pending = true;
             i += 1;
             continue;
         }
@@ -444,30 +463,21 @@ pub fn protocol_input(p: &mut ProtocolState, data: &[u8], output_empty: bool) ->
             i += 1;
             continue;
         }
-        if b == IAC {
-            match data.get(i + 1).copied() {
-                Some(SB) => {
-                    p.iac_mode = true;
-                    p.iac_buf.clear();
-                    i += 2;
-                }
-                Some(cmd @ (DO | DONT | WILL | WONT)) => {
-                    if let Some(opt) = data.get(i + 2).copied() {
-                        perform_handshake(p, cmd, opt, &mut r.bugs, output_empty);
-                        i += 3;
-                    } else {
-                        i += 2; // truncated at read boundary; C also mis-steps here
-                    }
-                }
-                Some(_) => i += 2,
-                None => i += 1,
-            }
-            continue;
-        }
         r.in_band.push(b);
         i += 1;
     }
     r
+}
+
+/// Apply the same limit to ordinary and escaped subnegotiation bytes.
+fn push_subneg_byte(p: &mut ProtocolState, b: u8, r: &mut InputResult) -> bool {
+    if p.iac_buf.len() >= mud_data::types::MAX_RAW_INPUT_LENGTH {
+        r.bugs.push("ProtocolInput: Too much incoming data to store in the buffer.\n".into());
+        r.fatal = true;
+        return false;
+    }
+    p.iac_buf.push(b);
+    true
 }
 
 /// The `[INFO]` banner the protocol layer puts in front of its own notices.
@@ -1551,6 +1561,77 @@ pub fn copyover_get(p: &ProtocolState) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn escaped_subnegotiation_bytes_obey_buffer_limit() {
+        let mut p = ProtocolState::new();
+        protocol_input(&mut p, &[IAC, SB, TELOPT_TTYPE], true);
+        for _ in 0..mud_data::types::MAX_RAW_INPUT_LENGTH - 1 {
+            assert!(!protocol_input(&mut p, &[IAC, IAC], true).fatal);
+        }
+        assert!(protocol_input(&mut p, &[IAC, IAC], true).fatal);
+        assert_eq!(p.iac_buf.len(), mud_data::types::MAX_RAW_INPUT_LENGTH);
+    }
+
+    #[test]
+    fn telnet_commands_survive_every_read_boundary() {
+        let wire = [IAC, DO, TELOPT_MSDP, IAC, SB, TELOPT_NAWS,
+            0, IAC, IAC, 0, 24, IAC, SE, b'l', b'o', b'o', b'k', b'\n', IAC, IAC];
+        for split in 0..=wire.len() {
+            let mut p = ProtocolState::new();
+            let mut input = protocol_input(&mut p, &wire[..split], true).in_band;
+            input.extend(protocol_input(&mut p, &wire[split..], true).in_band);
+            assert!(p.msdp, "split {split}");
+            assert_eq!((p.screen_width, p.screen_height), (255, 24), "split {split}");
+            assert_eq!(input, b"look\n\xff", "split {split}");
+            assert!(!p.iac_mode, "split {split}");
+        }
+    }
+
+    #[test]
+    fn bytewise_commands_keep_state_per_connection() {
+        let mut p = ProtocolState::new();
+        let mut other = ProtocolState::new();
+        let wire = [IAC, WILL, TELOPT_NAWS, IAC, WONT, TELOPT_NAWS,
+            IAC, DO, TELOPT_MSDP, IAC, DONT, TELOPT_MSDP,
+            IAC, SB, TELOPT_NAWS, 0, 80, 0, 24, IAC, SE, b'x'];
+        let mut input = Vec::new();
+        for (i, &byte) in wire.iter().enumerate() {
+            let result = protocol_input(&mut p, &[byte], true);
+            assert!(!result.fatal);
+            input.extend(result.in_band);
+            assert!(protocol_input(&mut p, &[], true).in_band.is_empty());
+            assert_eq!(protocol_input(&mut other, b"y", true).in_band, b"y");
+            if i == 2 { assert!(p.naws); }
+            if i == 8 { assert!(p.msdp); }
+        }
+        assert!(!p.naws && !p.msdp);
+        assert_eq!((p.screen_width, p.screen_height), (80, 24));
+        assert_eq!(input, b"x");
+        assert!(!p.iac_mode && !p.iac_pending && p.option_pending.is_none());
+    }
+
+    #[test]
+    fn full_subnegotiation_can_terminate_but_cannot_grow() {
+        let limit = mud_data::types::MAX_RAW_INPUT_LENGTH;
+        for suffix in [&[b'x'][..], &[IAC, IAC], &[IAC, b'x'], &[IAC, SE]] {
+            let mut p = ProtocolState::new();
+            protocol_input(&mut p, &[IAC, SB], true);
+            assert!(!protocol_input(&mut p, &vec![0; limit], true).fatal);
+            let mut fatal = false;
+            for byte in suffix {
+                fatal |= protocol_input(&mut p, &[*byte], true).fatal;
+                assert!(p.iac_buf.len() <= limit);
+            }
+            if suffix == [IAC, SE] {
+                assert!(!fatal);
+                assert!(!p.iac_mode);
+                assert_eq!(protocol_input(&mut p, b"look\n", true).in_band, b"look\n");
+            } else {
+                assert!(fatal);
+            }
+        }
+    }
 
     fn state_with_colors(x256: bool) -> ProtocolState {
         let mut p = ProtocolState::new();
