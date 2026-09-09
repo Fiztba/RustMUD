@@ -110,8 +110,9 @@ struct PendingConn {
 /// The resolver thread. It touches no game state — it takes an address and
 /// returns a name, which is the whole reason the wait can be moved off the
 /// loop without any locking.
-fn spawn_resolver() -> mpsc::Sender<(IpAddr, mpsc::Sender<Option<String>>)> {
-    let (tx, rx) = mpsc::channel::<(IpAddr, mpsc::Sender<Option<String>>)>();
+fn spawn_resolver() -> mpsc::SyncSender<(IpAddr, Instant, mpsc::Sender<Option<String>>)> {
+    // A slow resolver must not accumulate work for every expired connection.
+    let (tx, rx) = mpsc::sync_channel::<(IpAddr, Instant, mpsc::Sender<Option<String>>)>(128);
     std::thread::Builder::new()
         .name("resolver".into())
         .spawn(move || {
@@ -123,7 +124,10 @@ fn spawn_resolver() -> mpsc::Sender<(IpAddr, mpsc::Sender<Option<String>>)> {
             // this a host column's width is platform-dependent -- which is
             // what hid a justification bug in `last`.
             let force = std::env::var("MUD_RESOLVE_AS").ok();
-            while let Ok((ip, reply)) = rx.recv() {
+            while let Ok((ip, deadline, reply)) = rx.recv() {
+                if Instant::now() >= deadline {
+                    continue;
+                }
                 let got = mud_sys::resolve::reverse_lookup(ip);
                 let _ = reply.send(match (&force, got) {
                     (Some(name), Some(_)) => Some(name.clone()),
@@ -582,7 +586,6 @@ fn main() {
     poll.registry().register(&mut listener, LISTENER, Interest::READABLE).expect("register");
 
     let mut next_token: usize = 0;
-    let mut token_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
 
     // Reverse DNS happens here, not on the accept path.
     let resolve_tx = spawn_resolver();
@@ -590,7 +593,7 @@ fn main() {
 
     if let Some(cf) = copyover_file {
         logger.log(g.now, "Copyover recovery initiated");
-        copyover_recover(&mut g, cf, &mut poll, &mut next_token, &mut token_map);
+        copyover_recover(&mut g, cf, &mut poll, &mut next_token);
         drain_logs(&mut g, &mut logger);
     }
 
@@ -645,7 +648,7 @@ fn main() {
         loop {
             match listener.accept() {
                 Ok((mut stream, peer)) => {
-                    if g.descriptors.len() as i32 >= g.config.max_playing {
+                    if g.descriptors.len().saturating_add(pending.len()) >= g.config.max_playing.max(0) as usize {
                         let _ = std::io::Write::write_all(
                             &mut stream,
                             b"Sorry, the game is full right now... please try again later!\r\n",
@@ -657,16 +660,17 @@ fn main() {
                     // the socket instead and let the worker answer; the ban
                     // check still runs on the resolved name.
                     let ip = peer.ip();
+                    let deadline = Instant::now() + RESOLVE_DEADLINE;
                     let rx = if g.config.nameserver_is_slow {
                         None
                     } else {
                         let (tx, rx) = mpsc::channel();
-                        resolve_tx.send((ip, tx)).ok().map(|()| rx)
+                        resolve_tx.try_send((ip, deadline, tx)).ok().map(|()| rx)
                     };
                     pending.push(PendingConn {
                         stream,
                         ip,
-                        deadline: Instant::now() + RESOLVE_DEADLINE,
+                        deadline,
                         rx,
                     });
                 }
@@ -722,7 +726,6 @@ fn main() {
             let di = new_connection(&mut g, Some(stream), host.as_bytes());
             let tok = next_token;
             next_token += 1;
-            token_map.insert(tok, di);
             if let Some(d) = g.descriptors.get_mut(di) {
                 if let Some(s) = d.stream.as_mut() {
                     let _ = poll.registry().register(s, Token(tok), Interest::READABLE);
@@ -998,7 +1001,6 @@ fn copyover_recover(
     cf: mud_game::copyover::CopyoverFile,
     poll: &mut Poll,
     next_token: &mut usize,
-    token_map: &mut std::collections::HashMap<usize, usize>,
 ) {
     g.boot_time = cf.boot_time;
     for e in cf.entries {
@@ -1024,14 +1026,6 @@ fn copyover_recover(
         if poll.registry().register(&mut stream, Token(tok), Interest::READABLE).is_err() {
             continue;
         }
-        let di = mud_game::run::copyover_attach(g, stream, &e.host, &e.guiopt, &e.name, e.pref);
-        match di {
-            Some(di) => {
-                token_map.insert(tok, di);
-            }
-            None => {
-                token_map.remove(&tok);
-            }
-        }
+        let _ = mud_game::run::copyover_attach(g, stream, &e.host, &e.guiopt, &e.name, e.pref);
     }
 }
