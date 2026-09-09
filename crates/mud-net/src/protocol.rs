@@ -1588,6 +1588,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn bytewise_commands_keep_state_per_connection() {
+        let mut p = ProtocolState::new();
+        let mut other = ProtocolState::new();
+        let wire = [IAC, WILL, TELOPT_NAWS, IAC, WONT, TELOPT_NAWS,
+            IAC, DO, TELOPT_MSDP, IAC, DONT, TELOPT_MSDP,
+            IAC, SB, TELOPT_NAWS, 0, 80, 0, 24, IAC, SE, b'x'];
+        let mut input = Vec::new();
+        for (i, &byte) in wire.iter().enumerate() {
+            let result = protocol_input(&mut p, &[byte], true);
+            assert!(!result.fatal);
+            input.extend(result.in_band);
+            assert!(protocol_input(&mut p, &[], true).in_band.is_empty());
+            assert_eq!(protocol_input(&mut other, b"y", true).in_band, b"y");
+            if i == 2 { assert!(p.naws); }
+            if i == 8 { assert!(p.msdp); }
+        }
+        assert!(!p.naws && !p.msdp);
+        assert_eq!((p.screen_width, p.screen_height), (80, 24));
+        assert_eq!(input, b"x");
+        assert!(!p.iac_mode && !p.iac_pending && p.option_pending.is_none());
+    }
+
+    #[test]
+    fn full_subnegotiation_can_terminate_but_cannot_grow() {
+        let limit = mud_data::types::MAX_RAW_INPUT_LENGTH;
+        for suffix in [&[b'x'][..], &[IAC, IAC], &[IAC, b'x'], &[IAC, SE]] {
+            let mut p = ProtocolState::new();
+            protocol_input(&mut p, &[IAC, SB], true);
+            assert!(!protocol_input(&mut p, &vec![0; limit], true).fatal);
+            let mut fatal = false;
+            for byte in suffix {
+                fatal |= protocol_input(&mut p, &[*byte], true).fatal;
+                assert!(p.iac_buf.len() <= limit);
+            }
+            if suffix == [IAC, SE] {
+                assert!(!fatal);
+                assert!(!p.iac_mode);
+                assert_eq!(protocol_input(&mut p, b"look\n", true).in_band, b"look\n");
+            } else {
+                assert!(fatal);
+            }
+        }
+    }
+
     fn state_with_colors(x256: bool) -> ProtocolState {
         let mut p = ProtocolState::new();
         if x256 {
