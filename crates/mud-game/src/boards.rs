@@ -386,12 +386,6 @@ fn board_write_message(g: &mut Game, board: usize, chid: CharId, arg: &[u8]) -> 
         send_to_char(g, chid, b"The board is full.\r\n");
         return true;
     }
-    let Some(slot) = find_slot(g) else {
-        send_to_char(g, chid, b"The board is malfunctioning - sorry.\r\n");
-        g.log("SYSERR: Board: failed to find empty slot on write.".to_string());
-        return true;
-    };
-
     let mut arg = skip_spaces(arg).to_vec();
     mud_net::editor::delete_doubledollar(&mut arg);
     // JE: truncate the headline at 80 characters.
@@ -401,6 +395,12 @@ fn board_write_message(g: &mut Game, board: usize, chid: CharId, arg: &[u8]) -> 
         send_to_char(g, chid, b"We must have a headline!\r\n");
         return true;
     }
+
+    let Some(slot) = find_slot(g) else {
+        send_to_char(g, chid, b"The board is malfunctioning - sorry.\r\n");
+        g.log("SYSERR: Board: failed to find empty slot on write.".to_string());
+        return true;
+    };
 
     let tmstr = crate::act::wizard::strftime_date(g.now, g.tz_offset_secs);
     let mut paren = b"(".to_vec();
