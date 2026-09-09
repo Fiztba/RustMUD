@@ -600,14 +600,16 @@ pub fn objsave_parse_objects(g: &mut Game, r: &mut Reader) -> Vec<ObjSaveData> {
         }
 
         if line.first() == Some(&b'#') {
-            let Some(nr) = scan_vnum(&line) else { continue };
-            if nr != NOTHING as i32 && g.world.real_object(nr as Idx).is_none() {
-                g.log(format!("SYSERR: Prevented loading of non-existant item #{}.", nr));
-                continue;
-            }
             if let Some(prev) = temp.take() {
                 out.push(ObjSaveData { obj: prev, locate });
-                locate = 0;
+            }
+            locate = 0;
+            let Some(nr) = scan_vnum(&line) else { continue };
+            if !(0..=NOTHING as i32).contains(&nr)
+                || (nr != NOTHING as i32 && g.world.real_object(nr as Idx).is_none())
+            {
+                g.log(format!("SYSERR: Prevented loading of non-existant item #{}.", nr));
+                continue;
             }
             if nr == NOTHING as i32 {
                 let o = crate::obj::create_obj();
@@ -624,8 +626,20 @@ pub fn objsave_parse_objects(g: &mut Game, r: &mut Reader) -> Vec<ObjSaveData> {
             continue;
         }
 
-        let Some(oid) = temp else { continue };
         let (tag, value) = tag_argument(&line);
+        let Some(oid) = temp else {
+            // Skipped records still own their multiline strings. Their text
+            // may contain lines that look like object headers or terminators.
+            match tag.as_slice() {
+                b"ADes" => { let _ = r.fread_string("rent(Ades)"); }
+                b"EDes" => {
+                    let _ = r.fread_string("rent(Edes)");
+                    let _ = r.fread_string("rent(Edes)");
+                }
+                _ => {}
+            }
+            continue;
+        };
         let num = atoi(&value);
         match tag.as_slice() {
             b"ADes" => {
