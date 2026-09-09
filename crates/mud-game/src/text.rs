@@ -401,7 +401,7 @@ pub fn strfrmt(str_: &[u8], w: i32, h: i32, _justify: bool, hpad: bool, vpad: bo
                 llen = 0;
                 lcount += 1;
                 line.clear();
-            } else if matches!(s[sp], b'`' | b'$' | b'#') {
+            } else if matches!(s[sp], b'`' | b'$' | b'#') && sp + 1 < s.len() {
                 if sp + 1 < s.len() && s[sp + 1] == s[sp] {
                     wlen += 1;
                 }
@@ -744,5 +744,20 @@ mod get_one_line_tests {
         assert_eq!(e.len(), 1);
         let text = String::from_utf8_lossy(e[0].entry.as_ref()).into_owned();
         assert!(text.contains("\r\n\r\nbody"), "{:?}", text);
+    }
+}
+
+#[cfg(test)]
+mod formatter_boundary_tests {
+    use super::strfrmt;
+
+    #[test]
+    fn trailing_markers_are_single_printable_characters() {
+        for marker in [b'`', b'$', b'#'] {
+            let input = [b'a', marker];
+            let mut expected = input.to_vec();
+            expected.extend_from_slice(b"  \r\n");
+            assert_eq!(strfrmt(&input, 4, 1, false, true, false), expected);
+        }
     }
 }
