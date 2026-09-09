@@ -65,8 +65,12 @@ fn simultaneous_reports_keep_their_authors_and_bodies() {
     let cmd = mud_game::interpreter::find_command(g, b"bug").unwrap();
     mud_game::ibt::do_ibt(g, a, b"submit First report", cmd, mud_game::interpreter::SCMD_BUG);
     mud_game::ibt::do_ibt(g, b, b"submit Second report", cmd, mud_game::interpreter::SCMD_BUG);
+    mud_game::ibt::do_ibt(g, a, b"submit Forced second draft", cmd, mud_game::interpreter::SCMD_BUG);
+    assert_eq!(g.ibt.lists[0].len(), 2);
     input(g, da, b"Alice body");
     input(g, da, b"/s");
+    let disk = std::fs::read(g.lib_dir.join("misc/bugs")).unwrap();
+    assert!(!String::from_utf8_lossy(&disk).contains("Second report"));
     input(g, db, b"Bobby body");
     input(g, db, b"/s");
     assert_eq!(g.ibt.lists[0].len(), 2);
@@ -74,4 +78,35 @@ fn simultaneous_reports_keep_their_authors_and_bodies() {
     assert_eq!(g.ibt.lists[0][0].body, b"Alice body\r\n");
     assert_eq!(g.ibt.lists[0][1].name, b"Bobby");
     assert_eq!(g.ibt.lists[0][1].body, b"Bobby body\r\n");
+    for mode in [mud_game::interpreter::SCMD_BUG, mud_game::interpreter::SCMD_IDEA, mud_game::interpreter::SCMD_TYPO] {
+        let idx = mode as usize;
+        for cancelled in [false, true] {
+            g.ibt.lists[idx].clear();
+            mud_game::ibt::do_ibt(g, a, b"submit First", cmd, mode);
+            mud_game::ibt::do_ibt(g, b, b"submit Second", cmd, mode);
+            if cancelled {
+                input(g, da, b"/a");
+            } else {
+                g.ch_mut(a).level = LVL_IMPL;
+                mud_game::ibt::do_ibt(g, a, b"remove 1", cmd, mode);
+                input(g, da, b"Discarded body");
+                input(g, da, b"/s");
+            }
+            input(g, db, b"Surviving body");
+            input(g, db, b"/s");
+            assert_eq!(g.ibt.lists[idx].len(), 1);
+            assert_eq!(g.ibt.lists[idx][0].name, b"Bobby");
+            assert_eq!(g.ibt.lists[idx][0].body, b"Surviving body\r\n");
+        }
+    }
+    g.ibt.lists[0].clear();
+    mud_game::ibt::do_ibt(g, a, b"submit Lost link", cmd, mud_game::interpreter::SCMD_BUG);
+    mud_game::ibt::do_ibt(g, b, b"submit Still connected", cmd, mud_game::interpreter::SCMD_BUG);
+    mud_game::run::close_socket(g, da);
+    input(g, db, b"Connected body");
+    input(g, db, b"/s");
+    assert_eq!(g.ibt.lists[0].len(), 1);
+    assert_eq!(g.ibt.lists[0][0].name, b"Bobby");
+    assert_eq!(g.ibt.lists[0][0].body, b"Connected body\r\n");
+
 }

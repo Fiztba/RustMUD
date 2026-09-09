@@ -561,6 +561,10 @@ pub fn do_ibt(g: &mut Game, chid: CharId, argument: &[u8], cmd: usize, subcmd: i
     }
 
     if is_abbrev(&arg, b"submit") {
+        if g.ch(chid).desc.and_then(|di| g.descriptors.get(di)).is_some_and(|d| d.editing.is_some()) {
+            send_to_char(g, chid, b"Finish your current writing first.\r\n");
+            return;
+        }
         // `arg_text` is one_argument's raw remainder, so the headline
         // keeps the space that separated it from "submit", and a
         // whitespace-only tail counts as a heading (710).
