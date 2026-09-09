@@ -439,7 +439,7 @@ fn perform_map(g: &mut Game, chid: CharId, argument: &[u8], mut worldmap: bool) 
         }
     }
     if size < 0 {
-        size = -size;
+        size = size.saturating_abs();
         mapshape = MAP_RECTANGLE;
     }
     size = size.clamp(1, MAX_MAP_SIZE);
