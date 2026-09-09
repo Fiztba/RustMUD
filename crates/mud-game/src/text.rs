@@ -760,4 +760,22 @@ mod formatter_boundary_tests {
             assert_eq!(strfrmt(&input, 4, 1, false, true, false), expected);
         }
     }
+    #[test]
+    fn marker_pairs_and_wrapping_keep_their_existing_width() {
+        for marker in [b'`', b'$', b'#'] {
+            let pair = [marker, marker];
+            let mut expected = pair.to_vec();
+            expected.extend_from_slice(b"  \r\n");
+            assert_eq!(strfrmt(&pair, 3, 1, false, true, false), expected);
+            let input = [b'a', b' ', marker];
+            let mut expected = b"a\tn\r\n".to_vec();
+            expected.push(marker);
+            expected.extend_from_slice(b"\r\n");
+            assert_eq!(strfrmt(&input, 1, 1, false, false, false), expected);
+        }
+        for input in [b"".as_slice(), b"\t", b"\t[unfinished", b"\t<unfinished"] {
+            let _ = strfrmt(input, 10, 1, false, true, false);
+        }
+    }
+
 }
