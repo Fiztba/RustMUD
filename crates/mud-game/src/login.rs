@@ -86,25 +86,39 @@ fn set_state(g: &mut Game, di: usize, state: ConState) {
     }
 }
 
-/// CRYPT truncated compare:
-/// strncmp(CRYPT(typed, stored), stored, MAX_PWD_LENGTH) == 0. With DES
-/// crypt both sides are 13 bytes, so this is hash equality (F6: no plaintext
-/// path exists on any platform).
+/// Compare the complete DES hash. A damaged or truncated pfile must never
+/// turn a hash prefix (especially its two salt bytes) into a password.
 fn password_matches(typed: &[u8], stored: &[u8]) -> bool {
-    if stored.len() < 2 {
+    if stored.len() != 13 {
         return false;
     }
     match mud_data::crypt::crypt(typed, stored) {
-        Some(hash) => {
-            let n = MAX_PWD_LENGTH.min(stored.len()).min(hash.len());
-            hash[..n] == stored[..n]
-        }
+        Some(hash) => hash.as_slice() == stored,
         None => false,
     }
 }
 
 fn crypt_new_password(typed: &[u8], name: &[u8]) -> BStr {
     mud_data::crypt::crypt(typed, name).map(|h| h.to_vec()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod password_tests {
+    use super::*;
+
+    #[test]
+    fn stored_password_must_be_a_complete_hash() {
+        let stored = crypt_new_password(b"swordfish", b"Fizban");
+        assert!(password_matches(b"swordfish", &stored));
+        assert!(!password_matches(b"wrong", &stored));
+        for len in 0..stored.len() {
+            assert!(!password_matches(b"swordfish", &stored[..len]), "prefix length {len}");
+            assert!(!password_matches(b"wrong", &stored[..len]), "prefix length {len}");
+        }
+        let mut overlong = stored;
+        overlong.push(b'x');
+        assert!(!password_matches(b"swordfish", &overlong));
+    }
 }
 
 /// Allocate the char shell at CON_GET_NAME.
