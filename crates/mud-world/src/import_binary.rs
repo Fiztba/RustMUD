@@ -491,6 +491,24 @@ mod tests {
     }
 
     #[test]
+    fn unsafe_import_leaves_the_destination_untouched() {
+        let root = std::env::temp_dir().join(format!("rustmud-import-path-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let src = root.join("players.bin");
+        let lib = root.join("lib");
+        let mut r = record();
+        r[..LEN_NAME].fill(0);
+        let name = b"../../../escape";
+        r[..name.len()].copy_from_slice(name);
+        std::fs::write(&src, r).unwrap();
+        let result = import_binary_pfiles(&lib, &src, Endian::Little, false);
+        assert!(result.is_err());
+        assert!(!lib.exists());
+        assert!(!root.join("escape.plr").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn an_unwritten_slot_is_not_an_affect() {
         let mut r = record();
         // clear the one affect; nothing should be produced
