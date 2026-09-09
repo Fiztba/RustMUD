@@ -883,6 +883,10 @@ fn get_selling_obj(
     None
 }
 
+fn keeper_funds(g: &Game, keeper: CharId, shop_idx: usize) -> i64 {
+    i64::from(g.ch(keeper).points.gold) + i64::from(g.shops_rt[shop_idx].bank)
+}
+
 fn shopping_sell(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_idx: usize) {
     if !is_ok(g, keeper, chid, shop_idx) {
         return;
@@ -907,8 +911,8 @@ fn shopping_sell(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_id
     };
     let unlimited_cash = g.world.shops[shop_idx].bitvector & HAS_UNLIMITED_CASH != 0;
     if !unlimited_cash
-        && g.ch(keeper).points.gold + g.shops_rt[shop_idx].bank
-            < sell_price(g, first, shop_idx, keeper, chid)
+        && keeper_funds(g, keeper, shop_idx)
+            < i64::from(sell_price(g, first, shop_idx, keeper, chid))
     {
         let buf = shop_msg(g, shop_idx, "missing_cash1", &chname, 0);
         keeper_tell_raw(g, keeper, &buf);
@@ -920,7 +924,7 @@ fn shopping_sell(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_id
     let mut cur = Some(first);
     while let Some(o) = cur {
         if !(unlimited_cash
-            || g.ch(keeper).points.gold + g.shops_rt[shop_idx].bank >= sell_price(g, o, shop_idx, keeper, chid))
+            || keeper_funds(g, keeper, shop_idx) >= i64::from(sell_price(g, o, shop_idx, keeper, chid)))
             || sold >= sellnum
         {
             break;
@@ -928,7 +932,9 @@ fn shopping_sell(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_id
         let charged = sell_price(g, o, shop_idx, keeper, chid);
         goldamt += charged;
         if !unlimited_cash {
-            decrease_gold(g, keeper, charged);
+            let cash = charged.min(g.ch(keeper).points.gold);
+            decrease_gold(g, keeper, cash);
+            g.shops_rt[shop_idx].bank -= charged - cash;
         }
         sold += 1;
         obj_from_char(g, o);
@@ -940,8 +946,8 @@ fn shopping_sell(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_id
         let mut buf = chname.clone();
         if cur.is_none() {
             buf.extend_from_slice(format!(" You only have {} of those.", sold).as_bytes());
-        } else if g.ch(keeper).points.gold + g.shops_rt[shop_idx].bank
-            < sell_price(g, cur.unwrap(), shop_idx, keeper, chid)
+        } else if keeper_funds(g, keeper, shop_idx)
+            < i64::from(sell_price(g, cur.unwrap(), shop_idx, keeper, chid))
         {
             buf.extend_from_slice(format!(" I can only afford to buy {} of those.", sold).as_bytes());
         } else {
