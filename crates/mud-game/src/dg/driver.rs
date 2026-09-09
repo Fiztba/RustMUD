@@ -972,9 +972,10 @@ pub fn script_driver_default(
             } else if has_prefix(&cmd, b"unset ") {
                 process_unset(g, ctx, &cmd);
             } else if has_prefix(&cmd, b"wait ") {
-                process_wait(g, ctx, &cmd, cl, &raw);
-                g.dg_script_depth -= 1;
-                return ret_val;
+                if process_wait(g, ctx, &cmd, cl, &raw) {
+                    g.dg_script_depth -= 1;
+                    return ret_val;
+                }
             } else if has_prefix(&cmd, b"attach ") {
                 process_attach(g, ctx, &cmd);
             } else if has_prefix(&cmd, b"detach ") {
