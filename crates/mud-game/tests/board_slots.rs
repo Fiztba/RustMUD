@@ -69,4 +69,15 @@ fn empty_headlines_do_not_exhaust_board_slots() {
     assert!(mud_game::boards::gen_board(g, ch, board, cmd, b"A real headline"));
     assert_eq!(g.boards.msgs[0].len(), 1);
     assert!(g.descriptors.get(g.ch(ch).desc.unwrap()).unwrap().editing.is_some());
+    let slot = g.boards.msgs[0][0].slot_num;
+    let remove = mud_game::interpreter::find_command(g, b"remove").unwrap();
+    assert!(mud_game::boards::gen_board(g, ch, board, remove, b"1"));
+    assert_eq!(g.boards.msgs[0].len(), 1, "an active editor protects its slot");
+    let di = g.ch(ch).desc.unwrap();
+    g.descriptors.get_mut(di).unwrap().editing = None;
+    mud_game::boards::board_finish_write(g, ch, slot, 0, Some(b"Body\r\n".to_vec()));
+    assert!(mud_game::boards::gen_board(g, ch, board, remove, b"1"));
+    assert!(g.boards.msgs[0].is_empty());
+    assert_eq!(g.boards.taken.iter().filter(|&&b| b).count(), taken);
+
 }
