@@ -2736,6 +2736,7 @@ pub fn add_history(g: &mut Game, chid: CharId, msg: &[u8], hist_type: usize) {
 }
 
 pub fn do_history(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd: i32) {
+    if g.ch(chid).is_npc() { return; }
     let (arg, _) = one_argument(argument);
     let type_ = tables::HISTORY_TYPES.iter().position(|t| {
         !arg.is_empty() && t.as_bytes().starts_with(&arg[..])
@@ -2778,18 +2779,15 @@ pub fn page_string_desc(g: &mut Game, di: usize, text: &[u8]) {
 /// page_string through the descriptor pager.
 pub fn page_string(g: &mut Game, chid: CharId, text: &[u8]) {
     let Some(di) = g.ch(chid).desc else { return };
-    let (page_length, screen_width, compact) = {
-        let ch = g.ch(chid);
-        let ps = ch.ps();
-        let mut pl = ps.page_length;
-        if pl < 5 {
-            pl = 22;
+    let (page_length, screen_width, compact) = if g.ch(chid).is_npc() {
+        (22, 80, false)
+    } else {
+        if g.ch(chid).ps().page_length < 5 {
+            g.ch_mut(chid).ps_mut().page_length = 22;
         }
-        (pl, ps.screen_width, ch.prf(flags::PRF_COMPACT))
+        let ch = g.ch(chid);
+        (ch.ps().page_length, ch.ps().screen_width, ch.prf(flags::PRF_COMPACT))
     };
-    if page_length != g.ch(chid).ps().page_length && g.ch(chid).ps().page_length < 5 {
-        g.ch_mut(chid).ps_mut().page_length = 22;
-    }
     let allowed = comm::color_allowed_for_desc(g, di);
     g.descriptors.page_string(di, text, page_length, screen_width, compact, allowed);
 }

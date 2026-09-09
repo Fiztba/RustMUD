@@ -878,6 +878,7 @@ fn quest_stat(g: &mut Game, chid: CharId, argument: &[u8]) {
 // ------------------------------------------------------- command + spec-proc
 
 pub fn do_quest(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd: i32) {
+    if g.ch(chid).is_npc() { return; }
     let (arg1, arg2, _) = two_arguments(argument);
     let usage: &[u8] =
         if g.ch(chid).level < LVL_IMMORT { QUEST_MORT_USAGE } else { QUEST_IMM_USAGE };
@@ -928,7 +929,7 @@ pub fn questmaster(g: &mut Game, chid: CharId, qm: CharId, cmd: usize, argument:
             return true;
         }
     }
-    if !cmd_is(g, cmd, b"quest") {
+    if !cmd_is(g, cmd, b"quest") || g.ch(chid).is_npc() {
         return false;
     }
     let (arg1, arg2, _) = two_arguments(argument);
