@@ -12,11 +12,6 @@ use crate::model::{Exit, ExtraDesc, Room, World};
 
 use super::zon::{is_ws, Scan};
 
-/// `diagonal_dirs = NO`, and the reference lib/ ships no
-/// etc/config to override it — so DIR_COUNT is 6 and setup_dir refuses
-/// diagonal blocks without reading them.
-pub(crate) const CONFIG_DIAGONAL_DIRS: bool = false;
-
 /// `WORLD_FLAG_FIELD`: the longest single flag field a world file may
 /// carry, and the width the scanf conversions are bounded to.
 pub(crate) const WORLD_FLAG_FIELD: usize = 127;
@@ -246,12 +241,8 @@ fn setup_dir(r: &mut Reader, room: &mut Room, dir: i32) -> Result<(), String> {
     // this room yet, and report "room #65536" for every room but rnum 0.
     let buf2 = format!("room #{}, direction D{}", room.vnum, dir);
 
-    if !CONFIG_DIAGONAL_DIRS && (6..=9).contains(&dir) {
-        // Logs "Warning: Diagonal direction disabled" and returns WITHOUT
-        // reading the block's strings — the following lines then fall into
-        // the D/E/S dispatcher.
-        return Ok(());
-    }
+    // Persist all directions. The game's diagonal_dirs setting controls
+    // movement and editing, not whether existing exit data can be loaded.
     if !(0..10).contains(&dir) {
         // Out of range for dir_option — refuse the line.
         return Err(format!("SYSERR: Format error, {buf2}"));
@@ -513,16 +504,14 @@ mod tests {
     }
 
     #[test]
-    fn diagonal_dir_block_desyncs_parser() {
-        // With diagonals disabled setup_dir consumes nothing, so the
-        // block's text falls into the D/E/S dispatcher and dies there.
+    fn diagonal_dir_block_is_consumed() {
         let mut w = world_with_zones();
-        let e = parse_into(
+        parse_into(
             &mut w,
             b"#1\n~\n~\n0 0 0 0 0 0\nD6\nA tunnel.~\n~\n0 -1 5\nS\n$~\n",
         )
-        .unwrap_err();
-        assert_eq!(e, "SYSERR: Format error in room #1 (expecting D/E/S)");
+        .unwrap();
+        assert_eq!(w.rooms[0].dir_option[6].as_ref().unwrap().to_room_vnum, 5);
     }
 
     #[test]
