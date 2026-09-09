@@ -70,6 +70,13 @@ fn npc_quest_does_not_access_player_storage() {
     for cmd in [b"quest history".as_slice(), b"quest progress", b"quest leave"] {
         mud_game::interpreter::command_interpreter(&mut f.game, npc, cmd);
     }
+    let g = &mut f.game;
+    g.world.quests = vec![mud_world::model::Quest { qm_vnum: mud_game::dg::mob_vnum(g, npc), ..Default::default() }];
+    g.quest_secondary = vec![None];
+    let cmd = mud_game::interpreter::find_command(g, b"quest").unwrap();
+    for argument in [b"join 1".as_slice(), b"list", b"history"] {
+        assert!(!mud_game::quest::questmaster(g, npc, npc, cmd, argument));
+    }
 }
 
 #[test]
@@ -80,6 +87,17 @@ fn switched_npc_can_page_help_without_player_storage() {
     mud_game::act::informative::page_string(g, npc, b"Help text\r\n");
     assert!(String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output).contains("Help text"));
     assert!(g.ch(npc).player_specials.is_none());
+    g.texts.help_screen = b"NPC help screen\r\n".to_vec();
+    mud_game::interpreter::command_interpreter(g, npc, b"help");
+    assert!(String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output).contains("NPC help screen"));
+    let pc = player(g, b"Reader", 12345);
+    descriptor(g, pc, ConState::Playing);
+    g.ch_mut(pc).ps_mut().page_length = 12;
+    mud_game::act::informative::page_string(g, pc, b"Player page\r\n");
+    assert_eq!(g.ch(pc).ps().page_length, 12);
+    g.ch_mut(pc).ps_mut().page_length = 0;
+    mud_game::act::informative::page_string(g, pc, b"Player page\r\n");
+    assert_eq!(g.ch(pc).ps().page_length, 22);
 }
 
 #[test]
@@ -88,10 +106,18 @@ fn set_conditions_refuses_npcs() {
     let g = &mut f.game;
     let admin = player(g, b"Admin", 12345);
     g.ch_mut(admin).level = LVL_IMPL;
+    g.character_list.push_front(admin);
     descriptor(g, admin, ConState::Playing);
     mud_game::handler::char_to_room(g, admin, 0);
     for cmd in [b"testnpc hunger off".as_slice(), b"testnpc thirst 10", b"testnpc drunk 0"] {
         mud_game::act::wizset::do_set(g, admin, cmd, 0, 0);
     }
     assert!(g.ch(npc).player_specials.is_none());
+    mud_game::act::wizset::do_set(g, admin, b"Admin hunger off", 0, 0);
+    assert_eq!(g.ch(admin).ps().conditions[mud_game::ch::HUNGER], -1);
+    mud_game::act::informative::add_history(g, admin, b"Remembered\r\n", mud_game::act::informative::HIST_SAY);
+    mud_game::act::informative::do_history(g, admin, b"all", 0, 0);
+    let di = g.ch(admin).desc.unwrap();
+    assert!(String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output).contains("Remembered"));
+
 }
