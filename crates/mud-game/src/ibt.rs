@@ -46,6 +46,8 @@ pub struct Ibt {
     pub id_num: i64,
     pub flags: [u32; 4],
     pub dated: i64,
+    /// Live editor owner; never persisted.
+    pub writing_by: Option<CharId>,
 }
 
 impl Ibt {
@@ -325,6 +327,7 @@ pub fn save_ibt_file(g: &mut Game, mode: i32) {
     let Some(path) = ibt_path(g, mode) else { return };
     let mut out = Vec::new();
     for ibt in &g.ibt.lists[idx] {
+        if ibt.writing_by.is_some() { continue; }
         if !ibt.text.is_empty() {
             out.extend_from_slice(b"Text      ");
             out.extend_from_slice(&ibt.text);
@@ -371,19 +374,28 @@ pub fn save_ibt_file(g: &mut Game, mode: i32) {
     }
 }
 
-/// clean_ibt_list: drop body-less records (an aborted
-/// write leaves one behind).
-pub fn clean_ibt_list(g: &mut Game, mode: i32) {
-    let Some(idx) = mode_idx(mode) else { return };
-    g.ibt.lists[idx].retain(|i| !i.body.is_empty());
+/// Finish only the report belonging to this editor. A cancelled or removed
+/// report must never redirect its body into another player's report.
+pub fn ibt_finish_write(g: &mut Game, chid: CharId, mode: i32, body: Option<Vec<u8>>) -> bool {
+    let Some(idx) = mode_idx(mode) else { return false };
+    let Some(pos) = g.ibt.lists[idx].iter().position(|i| i.writing_by == Some(chid)) else {
+        return false;
+    };
+    if let Some(body) = body.filter(|b| !b.is_empty()) {
+        let report = &mut g.ibt.lists[idx][pos];
+        report.body = body;
+        report.writing_by = None;
+        true
+    } else {
+        g.ibt.lists[idx].remove(pos);
+        false
+    }
 }
 
-/// The editor's IBT half of playing_string_cleanup: the
-/// newest record of that list is the one being written.
-pub fn ibt_finish_write(g: &mut Game, mode: i32, body: Option<Vec<u8>>) {
-    let Some(idx) = mode_idx(mode) else { return };
-    if let Some(last) = g.ibt.lists[idx].last_mut() {
-        last.body = body.unwrap_or_default();
+/// A disconnected editor abandons only its own unfinished reports.
+pub fn abort_ibt_write(g: &mut Game, chid: CharId) {
+    for list in &mut g.ibt.lists {
+        list.retain(|i| i.writing_by != Some(chid));
     }
 }
 
@@ -409,7 +421,7 @@ fn tana(s: &[u8]) -> &'static [u8] {
 
 /// do_ibt — `bug`, `idea` and `typo`.
 pub fn do_ibt(g: &mut Game, chid: CharId, argument: &[u8], cmd: usize, subcmd: i32) {
-    if g.ch(chid).is_npc() {
+    if g.ch(chid).is_npc() || g.ch(chid).desc.is_none() {
         return;
     }
     let Some(idx) = mode_idx(subcmd) else {
@@ -549,6 +561,10 @@ pub fn do_ibt(g: &mut Game, chid: CharId, argument: &[u8], cmd: usize, subcmd: i
     }
 
     if is_abbrev(&arg, b"submit") {
+        if g.ch(chid).desc.and_then(|di| g.descriptors.get(di)).is_some_and(|d| d.editing.is_some()) {
+            send_to_char(g, chid, b"Finish your current writing first.\r\n");
+            return;
+        }
         // `arg_text` is one_argument's raw remainder, so the headline
         // keeps the space that separated it from "submit", and a
         // whitespace-only tail counts as a heading (710).
@@ -589,6 +605,7 @@ pub fn do_ibt(g: &mut Game, chid: CharId, argument: &[u8], cmd: usize, subcmd: i
             name: g.ch(chid).get_name().to_vec(),
             id_num: g.ch(chid).idnum,
             dated: g.now,
+            writing_by: Some(chid),
             ..Default::default()
         };
         g.ibt.lists[idx].push(ibt);

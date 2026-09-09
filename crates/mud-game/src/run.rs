@@ -475,6 +475,12 @@ pub fn close_socket(g: &mut Game, di: usize) {
     }
 
     if let Some(chid) = chid {
+        crate::ibt::abort_ibt_write(g, chid);
+        if let Some(ch) = g.chars.get_mut(chid).filter(|ch| !ch.is_npc()) {
+            for flag in [flags::PLR_BUG, flags::PLR_IDEA, flags::PLR_TYPO] {
+                ch.act.remove(flag);
+            }
+        }
         if g.try_ch(chid).is_some() {
             crate::llog::add_llog_entry(g, chid, crate::llog::LAST_DISCONNECT);
         }
@@ -849,8 +855,8 @@ fn playing_string_cleanup(
         if !g.try_ch(chid).is_some_and(|c| c.plr(flag)) {
             continue;
         }
-        if saved && text.is_some() {
-            crate::ibt::ibt_finish_write(g, mode, text.clone());
+        let body = if saved { text.clone() } else { None };
+        if crate::ibt::ibt_finish_write(g, chid, mode, body) {
             let mut m = label.to_vec();
             m.extend_from_slice(b" saved!\r\n");
             crate::comm::write_to_desc(g, di, &m);
@@ -859,7 +865,6 @@ fn playing_string_cleanup(
             let mut m = label.to_vec();
             m.extend_from_slice(b" aborted!\r\n");
             crate::comm::write_to_desc(g, di, &m);
-            crate::ibt::clean_ibt_list(g, mode);
         }
     }
 }
