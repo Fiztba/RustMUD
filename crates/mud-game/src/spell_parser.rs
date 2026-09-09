@@ -364,11 +364,8 @@ pub fn mag_objectmagic(g: &mut Game, chid: CharId, oid: ObjId, argument: &[u8]) 
                 let routines = spell_info(spellnum).routines;
                 let room = g.ch(chid).in_room;
                 if routines & (MAG_MASSES | MAG_AREAS) != 0 {
-                    let mut i = g.rooms[room as usize].people.len() as i32;
-                    while i > 0 {
-                        i -= 1;
-                        call_magic(g, chid, None, None, spellnum, k_level, CAST_STAFF);
-                    }
+                    // Area and mass routines already visit their targets.
+                    call_magic(g, chid, None, None, spellnum, k_level, CAST_STAFF);
                 } else {
                     let people = g.rooms[room as usize].people.clone();
                     for t in people {
