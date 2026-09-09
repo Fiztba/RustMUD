@@ -401,7 +401,7 @@ pub fn strfrmt(str_: &[u8], w: i32, h: i32, _justify: bool, hpad: bool, vpad: bo
                 llen = 0;
                 lcount += 1;
                 line.clear();
-            } else if matches!(s[sp], b'`' | b'$' | b'#') {
+            } else if matches!(s[sp], b'`' | b'$' | b'#') && sp + 1 < s.len() {
                 if sp + 1 < s.len() && s[sp + 1] == s[sp] {
                     wlen += 1;
                 }
@@ -745,4 +745,37 @@ mod get_one_line_tests {
         let text = String::from_utf8_lossy(e[0].entry.as_ref()).into_owned();
         assert!(text.contains("\r\n\r\nbody"), "{:?}", text);
     }
+}
+
+#[cfg(test)]
+mod formatter_boundary_tests {
+    use super::strfrmt;
+
+    #[test]
+    fn trailing_markers_are_single_printable_characters() {
+        for marker in [b'`', b'$', b'#'] {
+            let input = [b'a', marker];
+            let mut expected = input.to_vec();
+            expected.extend_from_slice(b"  \r\n");
+            assert_eq!(strfrmt(&input, 4, 1, false, true, false), expected);
+        }
+    }
+    #[test]
+    fn marker_pairs_and_wrapping_keep_their_existing_width() {
+        for marker in [b'`', b'$', b'#'] {
+            let pair = [marker, marker];
+            let mut expected = pair.to_vec();
+            expected.extend_from_slice(b"  \r\n");
+            assert_eq!(strfrmt(&pair, 3, 1, false, true, false), expected);
+            let input = [b'a', b' ', marker];
+            let mut expected = b"a\tn\r\n".to_vec();
+            expected.push(marker);
+            expected.extend_from_slice(b"\r\n");
+            assert_eq!(strfrmt(&input, 1, 1, false, false, false), expected);
+        }
+        for input in [b"".as_slice(), b"\t", b"\t[unfinished", b"\t<unfinished"] {
+            let _ = strfrmt(input, 10, 1, false, true, false);
+        }
+    }
+
 }
