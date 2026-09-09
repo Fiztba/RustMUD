@@ -66,4 +66,17 @@ fn failed_password_counts_do_not_overflow() {
     assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Password);
     mud_game::login::nanny(g, di, b"wrong");
     assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Close);
+
+    g.config.max_bad_pws = i32::MAX;
+    g.descriptors.get_mut(di).unwrap().state = ConState::Password;
+    g.descriptors.get_mut(di).unwrap().bad_pws = i32::MAX;
+    mud_game::login::nanny(g, di, b"wrong");
+    assert_eq!(g.descriptors.get(di).unwrap().bad_pws, i32::MAX);
+    assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Close);
+
+    g.descriptors.get_mut(di).unwrap().state = ConState::Password;
+    mud_game::login::nanny(g, di, b"secret");
+    assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Rmotd);
+    assert_eq!(g.descriptors.get(di).unwrap().bad_pws, 0);
+    assert_eq!(g.ch(ch).ps().bad_pws, 0);
 }
