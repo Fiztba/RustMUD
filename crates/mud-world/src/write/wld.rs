@@ -10,10 +10,6 @@ use mud_data::types::{MAX_STRING_LENGTH, NOTHING, NOWHERE};
 use crate::model::World;
 use crate::write::{push_int, VnumFmt};
 
-/// DIR_COUNT with CONFIG_DIAGONAL_DIRS = NO:
-/// only D0-D5 are ever written, whatever dir_option holds.
-const DIR_COUNT: usize = 6;
-
 /// convert_from_tabs: '\t' turns back into '@' unless followed by another
 /// '\t', in which case the pair
 /// is skipped unchanged — the inverse of parse_at's "@@" rule.
@@ -85,7 +81,7 @@ pub fn write_file_fmt(world: &World, zone_rnum: u16, fmt: VnumFmt) -> Vec<u8> {
         out.extend_from_slice(&buf2);
 
         // Exits.
-        for (j, ex) in room.dir_option.iter().enumerate().take(DIR_COUNT) {
+        for (j, ex) in room.dir_option.iter().enumerate() {
             let Some(ex) = ex else { continue };
             out.extend_from_slice(format!("D{j}\n").as_bytes());
             // general description: strip_cr only, no tab conversion.
@@ -227,7 +223,7 @@ mod tests {
         room.dir_option[1] = mk(EX_ISDOOR | EX_PICKPROOF, NOTHING, NOWHERE);
         room.dir_option[2] = mk(EX_ISDOOR | EX_HIDDEN, 65534, NOWHERE);
         room.dir_option[3] = mk(EX_ISDOOR | EX_PICKPROOF | EX_HIDDEN, 5, NOWHERE);
-        // Diagonal slots exist in memory but DIR_COUNT=6 hides 6..=9.
+        // Diagonal exits must survive saves too.
         room.dir_option[7] = mk(0, NOTHING, NOWHERE);
         add_room(&mut w, room);
         add_room(&mut w, Room { vnum: 1250, zone: 0, ..Default::default() });
@@ -237,7 +233,7 @@ mod tests {
         assert!(s.contains("D1\n~\n~\n2 -1 -1\n"), "{s}");
         assert!(s.contains("D2\n~\n~\n3 65534 -1\n"), "{s}");
         assert!(s.contains("D3\n~\n~\n4 5 -1\n"), "{s}");
-        assert!(!s.contains("D7"), "{s}");
+        assert!(s.contains("D7\n~\n~\n0 -1 -1\n"), "{s}");
     }
 
     #[test]
