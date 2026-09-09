@@ -175,7 +175,7 @@ pub fn check_killer(g: &mut Game, chid: CharId, vict: CharId) {
 
 /// pk_allowed. true = the fight may proceed.
 pub fn pk_allowed(g: &mut Game, chid: CharId, vict: CharId) -> bool {
-    if g.ch(chid).is_npc() || g.ch(vict).is_npc() {
+    if chid == vict || g.ch(chid).is_npc() || g.ch(vict).is_npc() {
         return true;
     }
     if g.config.pk_setting == 0 {
