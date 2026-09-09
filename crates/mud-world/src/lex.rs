@@ -214,12 +214,19 @@ pub fn atol(s: &[u8]) -> i64 {
         v = v.wrapping_mul(10).wrapping_add((c - b'0') as i64);
         i += 1;
     }
-    if neg { -v } else { v }
+    if neg { v.wrapping_neg() } else { v }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_minimum_signed_integer_without_panicking() {
+        assert_eq!(atol(b"-9223372036854775808"), i64::MIN);
+        assert_eq!(atol(b"-9223372036854775809"), i64::MAX);
+        assert_eq!(atol(b"9223372036854775807"), i64::MAX);
+    }
 
     #[test]
     fn get_line_skips_comments_and_blanks() {

@@ -109,7 +109,7 @@ impl<'a> Scanf<'a> {
             return None;
         }
         self.pos = p;
-        Some((if neg { -v } else { v }) as i32)
+        Some((if neg { v.wrapping_neg() } else { v }) as i32)
     }
 
     /// %c
@@ -509,6 +509,15 @@ fn interpret_espec(keyword: &[u8], value: Option<&[u8]>, mob: &mut MobProto) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scanf_signed_boundary_keeps_wrapping_and_cursor_semantics() {
+        let mut sc = Scanf::new(b"-9223372036854775808 42");
+        assert_eq!(sc.int(), Some(0));
+        assert_eq!(sc.int(), Some(42));
+        let mut sc = Scanf::new(b"-2147483648");
+        assert_eq!(sc.int(), Some(i32::MIN));
+    }
 
     fn parse(data: &[u8]) -> World {
         let mut world = World::default();

@@ -286,7 +286,7 @@ fn scan_long(s: &[u8], i: &mut usize) -> Option<i64> {
         return None;
     }
     *i = j;
-    Some(if neg { -v } else { v })
+    Some(if neg { v.wrapping_neg() } else { v })
 }
 
 /// The TrigWait event fired from the heartbeat: re-validate, then restart.
@@ -1034,4 +1034,19 @@ pub fn fire(g: &mut Game, go: GoId, iid: u64, vars: Vec<(&'static [u8], BStr)>) 
 /// ADD_UID_VAR helper: "}<id>".
 pub fn uid_var(id: i64) -> BStr {
     format!("}}{}", id).into_bytes()
+}
+
+#[cfg(test)]
+mod numeric_tests {
+    use super::*;
+
+    #[test]
+    fn scan_long_handles_minimum_signed_integer() {
+        let mut pos = 0;
+        let input = b"-9223372036854775808s";
+        assert_eq!(scan_long(input, &mut pos), Some(i64::MIN));
+        assert_eq!(input[pos], b's');
+        let mut pos = 0;
+        assert_eq!(scan_long(b"-9223372036854775809", &mut pos), Some(i64::MAX));
+    }
 }
