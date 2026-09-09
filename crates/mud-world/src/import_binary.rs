@@ -138,6 +138,9 @@ impl<'a> Cursor<'a> {
 fn parse_record(rec: &[u8], e: Endian) -> Result<PlayerFile, String> {
     let c = Cursor { b: rec, e };
 
+    if !rec[OFF_NAME..OFF_NAME + LEN_NAME].contains(&0) {
+        return Err("name field is not NUL-terminated".into());
+    }
     let name = c.cstr(OFF_NAME, LEN_NAME);
     if name.is_empty() {
         return Err("empty name".into());
@@ -148,6 +151,9 @@ fn parse_record(rec: &[u8], e: Endian) -> Result<PlayerFile, String> {
              not the assumed layout",
             String::from_utf8_lossy(&name)
         ));
+    }
+    if get_filename(FileKind::Plr, &name).is_none() {
+        return Err("name field contains a path or stream separator".into());
     }
 
     let mut pf = PlayerFile { name: Some(name), ..Default::default() };
@@ -469,6 +475,37 @@ mod tests {
         r[OFF_NAME..OFF_NAME + 4].copy_from_slice(&[0x01, 0xFF, 0x7F, 0x02]);
         let err = parse_record(&r, Endian::Little).unwrap_err();
         assert!(err.contains("not printable"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn refuses_unsafe_or_unterminated_names() {
+        for name in [b"../../../escape".as_slice(), b"..\\..\\escape", b"bob:stream"] {
+            let mut r = record();
+            r[..LEN_NAME].fill(0);
+            r[..name.len()].copy_from_slice(name);
+            assert!(parse_record(&r, Endian::Little).is_err(), "accepted {name:?}");
+        }
+        let mut r = record();
+        r[..LEN_NAME].fill(b'A');
+        assert!(parse_record(&r, Endian::Little).is_err());
+    }
+
+    #[test]
+    fn unsafe_import_leaves_the_destination_untouched() {
+        let root = std::env::temp_dir().join(format!("rustmud-import-path-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let src = root.join("players.bin");
+        let lib = root.join("lib");
+        let mut r = record();
+        r[..LEN_NAME].fill(0);
+        let name = b"../../../escape";
+        r[..name.len()].copy_from_slice(name);
+        std::fs::write(&src, r).unwrap();
+        let result = import_binary_pfiles(&lib, &src, Endian::Little, false);
+        assert!(result.is_err());
+        assert!(!lib.exists());
+        assert!(!root.join("escape.plr").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

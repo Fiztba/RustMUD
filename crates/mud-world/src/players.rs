@@ -220,9 +220,10 @@ fn lower(b: u8) -> u8 {
 /// get_filename. The whole name is lowercased, the bucket
 /// is chosen from its first letter, and the relative path is
 /// `<prefix>/<bucket>/<name>.<suffix>` (e.g. "plrfiles/A-E/bob.plr").
-/// Empty names return None.
+/// Empty names and names containing path separators, NUL, or a Windows
+/// drive/stream separator return None.
 pub fn get_filename(kind: FileKind, name: &[u8]) -> Option<PathBuf> {
-    if name.is_empty() {
+    if name.is_empty() || name.iter().any(|b| matches!(b, b'/' | b'\\' | b':' | 0)) {
         return None;
     }
     let lowered: Vec<u8> = name.iter().map(|&b| lower(b)).collect();
@@ -990,7 +991,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// needed, rather than relying on shipped placeholder files), atomically.
 pub fn write_pfile(lib: &Path, name: &[u8], bytes: &[u8]) -> io::Result<()> {
     let rel = get_filename(FileKind::Plr, name)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty player name"))?;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid player name"))?;
     let path = lib.join(rel);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -1145,6 +1146,15 @@ mod tests {
             Path::new("plrfiles/ZZZ/123abc.plr")
         );
         assert!(get_filename(FileKind::Plr, b"").is_none());
+    }
+
+    #[test]
+    fn player_names_cannot_introduce_path_components_or_streams() {
+        for kind in [FileKind::Plr, FileKind::Objs, FileKind::Vars, FileKind::Text] {
+            for name in [b"../../../escape".as_slice(), b"..\\..\\escape", b"bob:stream", b"bob\0"] {
+                assert!(get_filename(kind, name).is_none(), "accepted {name:?}");
+            }
+        }
     }
 
     #[test]
