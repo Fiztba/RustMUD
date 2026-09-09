@@ -1001,15 +1001,15 @@ fn con_password(g: &mut Game, di: usize, arg: &[u8]) {
         g.mudlog(MudlogKind::Brf, LVL_GOD, true, &format!("Bad PW: {} [{}]", name, host));
         {
             let ps = g.ch_mut(chid).ps_mut();
-            ps.bad_pws += 1;
+            ps.bad_pws = ps.bad_pws.saturating_add(1);
         }
         crate::players_glue::save_char(g, chid);
         let bad = {
             let d = g.descriptors.get_mut(di).unwrap();
-            d.bad_pws += 1;
+            d.bad_pws = d.bad_pws.saturating_add(1);
             d.bad_pws
         };
-        if bad as i32 >= g.config.max_bad_pws {
+        if bad >= g.config.max_bad_pws {
             write_desc(g, di, b"Wrong password... disconnecting.\r\n");
             set_state(g, di, ConState::Close);
         } else {

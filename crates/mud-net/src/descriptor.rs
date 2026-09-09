@@ -55,7 +55,7 @@ pub struct EditSession {
 pub struct Descriptor {
     pub stream: Option<mio::net::TcpStream>,
     pub host: Vec<u8>,
-    pub bad_pws: u8,
+    pub bad_pws: i32,
     pub idle_tics: u8,
     pub state: ConState,
     pub desc_num: u32,
