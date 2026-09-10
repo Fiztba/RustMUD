@@ -73,4 +73,25 @@ fn new_message_sets_remain_counted_and_save_on_quit() {
     let saved = loaded.iter().find(|s| s.a_type == 480).unwrap();
     assert_eq!(saved.number_of_attacks, 2);
     assert_eq!(saved.msg.len(), 2);
+    // Navigating existing sets does not create changes.
+    mud_game::olc::msgedit::do_msgedit(g, ch, slot.to_string().as_bytes(), 0, 0);
+    for input in [b"n".as_slice(), b"p", b"q"] {
+        assert!(mud_game::olc::olc_parse(g, di, input));
+    }
+    assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Playing);
+    // Deletion keeps a valid selection count and refuses the final set.
+    mud_game::olc::msgedit::do_msgedit(g, ch, slot.to_string().as_bytes(), 0, 0);
+    for input in [b"x".as_slice(), b"x", b"q", b"y"] {
+        assert!(mud_game::olc::olc_parse(g, di, input));
+    }
+    assert_eq!(g.fight_messages[slot].number_of_attacks, 1);
+    assert_eq!(g.fight_messages[slot].msg.len(), 1);
+    assert!(mud_game::fight::skill_message(g, 1, ch, ch, 480));
+    // Aborting an appended set leaves the live table unchanged.
+    mud_game::olc::msgedit::do_msgedit(g, ch, slot.to_string().as_bytes(), 0, 0);
+    for input in [b"n".as_slice(), b"q", b"n"] {
+        assert!(mud_game::olc::olc_parse(g, di, input));
+    }
+    assert_eq!(g.fight_messages[slot].number_of_attacks, 1);
+    assert_eq!(g.fight_messages[slot].msg.len(), 1);
 }
