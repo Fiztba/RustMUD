@@ -712,7 +712,7 @@ fn shopping_buy(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_idx
                 send_to_char(g, chid, &msg);
                 return;
             }
-            if ch.carry_weight + obj_weight(g, obj) > can_carry_w(ch) {
+            if i64::from(ch.carry_weight) + i64::from(obj_weight(g, obj)) > i64::from(can_carry_w(ch)) {
                 let f = handler::fname(obj_name(g, obj));
                 let mut msg = f;
                 msg.extend_from_slice(b": You can't carry that much weight.\r\n");
@@ -737,7 +737,7 @@ fn shopping_buy(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_idx
         if !(funds_ok
             && (ch.carry_items as i32) < can_carry_n(ch)
             && bought < buynum
-            && ch.carry_weight + obj_weight(g, o) <= can_carry_w(ch))
+            && i64::from(ch.carry_weight) + i64::from(obj_weight(g, o)) <= i64::from(can_carry_w(ch)))
         {
             break;
         }
@@ -793,7 +793,7 @@ fn shopping_buy(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_idx
             );
         } else if ch.carry_items as i32 >= can_carry_n(ch) {
             buf.extend_from_slice(format!(" You can only hold {}.", bought).as_bytes());
-        } else if ch.carry_weight + obj_weight(g, cur.unwrap()) > can_carry_w(ch) {
+        } else if i64::from(ch.carry_weight) + i64::from(obj_weight(g, cur.unwrap())) > i64::from(can_carry_w(ch)) {
             buf.extend_from_slice(format!(" You can only carry {}.", bought).as_bytes());
         } else {
             buf.extend_from_slice(format!(" Something screwy only gave you {}.", bought).as_bytes());

@@ -303,7 +303,7 @@ pub fn do_steal(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcm
                     if g.try_obj(obj).is_none() {
                         return;
                     }
-                    if g.ch(chid).carry_weight + g.obj(obj).weight < crate::handler::can_carry_w(g.ch(chid)) {
+                    if i64::from(g.ch(chid).carry_weight) + i64::from(g.obj(obj).weight) < i64::from(crate::handler::can_carry_w(g.ch(chid))) {
                         crate::handler::obj_from_char(g, obj);
                         crate::handler::obj_to_char(g, obj, chid);
                         send_to_char(g, chid, b"Got it!\r\n");
