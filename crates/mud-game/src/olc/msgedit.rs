@@ -15,9 +15,8 @@
 //! reproduced here; skipping them put an appended record at the wrong end of
 //! lib/misc/messages, which is how the file comparison caught it.
 //!
-//! For a slot with no messages, the copy seeds one blank record
-//! and leaves `number_of_attacks` at the source's zero — so an empty slot
-//! opens editable and reads `[45x0]`.
+//! For a slot with no messages, the copy seeds one blank record and counts
+//! it, so saving a new type leaves a valid combat selection range.
 //!
 //! One shape is fixed rather than kept:
 //!
@@ -239,13 +238,14 @@ pub fn do_msgedit(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _sub
     olc.number = num;
     olc.value = 0;
 
-    // The working copy is the slot's list reversed. An empty slot gets one
-    // blank record while keeping the source's attack count of zero.
+    // The working copy is the slot's list reversed. Count the seeded record
+    // too: combat selects a one-based index using number_of_attacks.
     let mut list = g.fight_messages[num as usize].clone();
     list.msg.reverse();
     if list.msg.is_empty() {
         list.msg.push(MessageType::default());
     }
+    list.number_of_attacks = list.msg.len() as i32;
     olc.msg_list = Some(Box::new(list));
     olc.msg_index = 0;
 
@@ -446,6 +446,7 @@ pub fn msgedit_parse(
                     if olc.msg_index + 1 >= list.msg.len() {
                         list.msg.push(MessageType::default());
                         list.number_of_attacks += 1;
+                        olc.value = 1;
                     }
                     olc.msg_index += 1;
                     msgedit_main_menu(g, di, &mut olc);
