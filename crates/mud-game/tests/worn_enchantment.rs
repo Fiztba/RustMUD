@@ -65,3 +65,33 @@ fn enchanting_a_wielded_weapon_updates_and_later_removes_its_bonuses() {
     assert!(mud_game::handler::equip_char(g, ch, oid, WEAR_WIELD));
     assert_eq!((g.ch(ch).points.hitroll, g.ch(ch).points.damroll), (7, 5));
 }
+
+#[test]
+fn enchantment_preserves_level_alignment_and_unworn_behavior() {
+    use mud_data::flags;
+    use mud_game::handler::*;
+    let mut f = fixture("matrix"); let g = &mut f.game;
+    for (level, hit, damage) in [(17, 1, 1), (18, 2, 1), (20, 2, 2)] {
+        for alignment in [-1000, 0, 1000] {
+            for worn in [false, true] {
+                let ch = player(g, b"Caster", 12345); char_to_room(g, ch, 0); descriptor(g, ch, ConState::Playing);
+                g.ch_mut(ch).alignment = alignment; g.ch_mut(ch).points.hitroll = 5; g.ch_mut(ch).points.damroll = 3;
+                let mut object = mud_game::obj::create_obj(); object.type_flag = flags::ITEM_WEAPON;
+                object.perm_affects.set(flags::AFF_DETECT_INVIS);
+                let oid = g.objs.insert(object);
+                if worn { assert!(equip_char(g, ch, oid, WEAR_WIELD)); } else { obj_to_char(g, oid, ch); }
+                g.ch_mut(ch).act.remove(flags::PLR_CRASH);
+                mud_game::spells::spell_enchant_weapon(g, level, ch, None, Some(oid));
+                assert_eq!((g.ch(ch).points.hitroll, g.ch(ch).points.damroll), if worn { (5 + hit, 3 + damage) } else { (5, 3) });
+                assert_eq!(g.obj(oid).extra_flags.is_set(flags::ITEM_ANTI_GOOD), alignment < -350);
+                assert_eq!(g.obj(oid).extra_flags.is_set(flags::ITEM_ANTI_EVIL), alignment > 350);
+                if worn {
+                    assert!(g.ch(ch).plr(flags::PLR_CRASH)); assert!(g.ch(ch).aff(flags::AFF_DETECT_INVIS));
+                    unequip_char(g, ch, WEAR_WIELD); assert_eq!((g.ch(ch).points.hitroll, g.ch(ch).points.damroll), (5, 3));
+                } else { obj_from_char(g, oid); }
+                assert!(equip_char(g, ch, oid, WEAR_WIELD));
+                assert_eq!((g.ch(ch).points.hitroll, g.ch(ch).points.damroll), (5 + hit, 3 + damage));
+            }
+        }
+    }
+}
