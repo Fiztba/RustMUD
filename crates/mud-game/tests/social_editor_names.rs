@@ -88,3 +88,28 @@ fn own_name_and_unused_names_remain_editable() {
         assert_eq!(olc.action.as_ref().unwrap().sort_as, b"revieww");
     }
 }
+
+#[test]
+fn mixed_case_social_rename_remains_callable_after_save() {
+    let mut f = fixture("case"); let g = &mut f.game;
+    let actor = player(g, b"Admin", 12345); let di = descriptor(g, actor, ConState::Aedit);
+    g.ch_mut(actor).position = POS_STANDING;
+    mud_game::handler::char_to_room(g, actor, 1);
+    let mut olc = OlcData::new(); olc.zone_num = 0; olc.action = Some(Box::new(g.socials[0].clone()));
+    olc.action.as_mut().unwrap().char_no_arg = Some(b"Review gesture succeeds.".to_vec());
+    olc.action.as_mut().unwrap().min_level_char = 0;
+    olc.mode = AEDIT_ACTION_NAME;
+    let mut olc = aedit_parse(g, di, olc, b"ReviewGesture").unwrap();
+    olc.mode = AEDIT_SORT_AS;
+    let mut olc = aedit_parse(g, di, olc, b"ReviewGesture").unwrap();
+    olc.mode = AEDIT_CONFIRM_SAVESTRING;
+    assert!(aedit_parse(g, di, olc, b"y").is_none());
+    for command in [b"reviewgesture".as_slice(), b"REVIEWGESTURE", b"reviewgest"] {
+        g.descriptors.get_mut(di).unwrap().output.clear();
+        mud_game::interpreter::command_interpreter(g, actor, command);
+        let output = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
+        assert!(output.contains("Review gesture succeeds."), "{output}");
+    }
+    let social = g.socials.iter().find(|s| s.command == b"reviewgesture").unwrap();
+    assert_eq!(social.sort_as, b"reviewgesture");
+}
