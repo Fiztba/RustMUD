@@ -33,24 +33,24 @@ fn children_survive_when_saved_container_cannot_be_equipped() {
     use mud_data::{flags, types::*};
     let mut f = fixture("equipment");
     let g = &mut f.game;
-    for locate in [WEAR_BODY as i32 + 1, NUM_WEARS as i32 + 20] {
+    for (locate, wear, worn) in [(WEAR_BODY as i32 + 1, 0, false), (NUM_WEARS as i32 + 20, 0, false), (WEAR_BODY as i32 + 1, 1u32 << flags::ITEM_WEAR_BODY, true)] {
         let ch = g.chars.insert(mud_game::ch::Char {
             name: Some(b"Tester".to_vec()),
             player_specials: Some(Box::new(Default::default())),
             ..Default::default()
         });
-        let data = format!("1 1800000000 0 0 0 0\n#65535\nName: child\nWght: 3\nLoc : -1\n#65535\nName: bag\nType: {}\nVals: 100 0 0 0\nWght: 7\nLoc : {locate}\n$~\n", flags::ITEM_CONTAINER);
+        let data = format!("1 1800000000 0 0 0 0\n#65535\nName: child\nWght: 3\nLoc : -1\n#65535\nName: bag\nWear: {wear} 0 0 0\nType: {}\nVals: 100 0 0 0\nWght: 7\nLoc : {locate}\n$~\n", flags::ITEM_CONTAINER);
         let path = g.lib_dir.join("plrobjs/P-T/tester.objs");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, data).unwrap();
         mud_game::objsave::crash_load(g, ch);
-        assert_eq!(g.ch(ch).carrying.len(), 1);
-        let bag = g.ch(ch).carrying[0];
+        assert_eq!(g.ch(ch).carrying.len(), if worn { 0 } else { 1 });
+        let bag = if worn { g.ch(ch).equipment[WEAR_BODY].unwrap() } else { g.ch(ch).carrying[0] };
         assert_eq!(g.obj(bag).contains.len(), 1, "fallback bag lost its child");
         let child = g.obj(bag).contains[0];
         assert_eq!(g.obj(child).name.as_deref(), Some(b"child".as_slice()));
         assert_eq!(g.obj(bag).weight, 10);
-        assert_eq!(g.ch(ch).carry_weight, 10);
+        assert_eq!(g.ch(ch).carry_weight, if worn { 0 } else { 10 });
     }
 }
 
