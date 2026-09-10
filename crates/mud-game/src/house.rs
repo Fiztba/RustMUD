@@ -99,6 +99,18 @@ fn parse_binary_control(data: &[u8]) -> Option<Vec<HouseControl>> {
     Some(out)
 }
 
+/// Only the writer's header or a leading "#<vnum>" line proves ASCII: a
+/// binary record starts with the house vnum (u16 LE), whose low byte can
+/// itself be '*' or '#'.
+fn is_ascii_control(data: &[u8]) -> bool {
+    if data.starts_with(b"* tbaMUD house control file") {
+        return true;
+    }
+    let Some(rest) = data.strip_prefix(b"#") else { return false };
+    let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+    digits > 0 && matches!(rest.get(digits), Some(b'\n') | Some(b'\r'))
+}
+
 fn parse_ascii_control(data: &[u8]) -> Vec<HouseControl> {
     let mut out: Vec<HouseControl> = Vec::new();
     let mut cur: Option<HouseControl> = None;
@@ -181,24 +193,23 @@ pub fn house_boot(g: &mut Game) {
         return;
     };
 
-    let is_ascii = data.starts_with(b"*") || data.starts_with(b"#");
-    let candidates = if is_ascii {
+    let candidates = if is_ascii_control(&data) {
         parse_ascii_control(&data)
+    } else if let Some(v) = parse_binary_control(&data) {
+        g.log(format!(
+            "   Converting legacy binary hcontrol ({} records) to ASCII.",
+            v.len()
+        ));
+        v
     } else {
-        match parse_binary_control(&data) {
-            Some(v) => {
-                g.log(format!(
-                    "   Converting legacy binary hcontrol ({} records) to ASCII.",
-                    v.len()
-                ));
-                v
-            }
-            None => {
-                g.log("SYSERR: hcontrol file is neither ASCII nor a known binary layout.".to_string());
-                return;
-            }
-        }
+        parse_ascii_control(&data)
     };
+    if candidates.is_empty() && !data.is_empty() {
+        // Never rewrite a file that yielded nothing: a misread format must
+        // not wipe the houses it holds.
+        g.log("SYSERR: hcontrol file holds no readable house records; leaving it untouched.".to_string());
+        return;
+    }
 
     for h in candidates {
         if g.houses.len() >= MAX_HOUSES {
