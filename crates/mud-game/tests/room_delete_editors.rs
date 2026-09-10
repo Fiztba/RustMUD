@@ -53,7 +53,7 @@ fn deleting_a_room_updates_other_builders_pending_room_and_reset_references() {
     let builder = player(g, b"Builder", 12345); mud_game::handler::char_to_room(g, builder, 0);
     let rd = descriptor(g, builder, ConState::Redit);
     let zd = descriptor(g, builder, ConState::Zedit);
-    let mut room_editor = mud_game::olc::OlcData::new(); room_editor.room = Some(Box::new(g.world.rooms[3].clone()));
+    let mut room_editor = mud_game::olc::OlcData::new(); room_editor.number = g.world.rooms[3].vnum as i32; room_editor.zone_num = g.world.rooms[3].zone as i32; room_editor.room = Some(Box::new(g.world.rooms[3].clone()));
     for (direction, target) in [0, 1, 2, 3, NOWHERE, 1, 2, 3, NOWHERE, 0].into_iter().enumerate() {
         room_editor.room.as_mut().unwrap().dir_option[direction] = Some(Box::new(mud_world::model::Exit {
             general_description: None, keyword: Some(b"door".to_vec()), exit_info: 1, key: 123,
@@ -76,4 +76,17 @@ fn deleting_a_room_updates_other_builders_pending_room_and_reset_references() {
     let cmds = &g.olc[&zd].zone.as_ref().unwrap().cmds;
     assert_eq!((cmds[0].arg1, cmds[0].arg2, cmds[0].arg3), (2, 1, 2));
     assert_eq!(cmds[1].command, b'*'); assert_eq!(cmds[2].arg3, 2); assert_eq!(cmds[3].arg3, NOWHERE as i32);
+    assert!(mud_game::olc::genwld::delete_room(g, 1));
+    let mut pending = g.olc.remove(&rd).unwrap();
+    let number = pending.number;
+    mud_game::olc::redit::redit_save_internally(g, rd, &mut pending);
+    let saved = g.real_room(number).unwrap() as usize;
+    for (direction, expected) in [0, NOWHERE, NOWHERE, 1, NOWHERE, NOWHERE, NOWHERE, 1, NOWHERE, 0].into_iter().enumerate() {
+        let exit = g.world.rooms[saved].dir_option[direction].as_ref().unwrap();
+        assert_eq!(exit.to_room, expected, "saved direction={direction}");
+        assert_eq!(exit.key, 123); assert_eq!(exit.exit_info, 1); assert_eq!(exit.keyword.as_deref(), Some(b"door".as_slice()));
+    }
+    let cmds = &g.olc[&zd].zone.as_ref().unwrap().cmds;
+    assert_eq!((cmds[0].arg1, cmds[0].arg2, cmds[0].arg3), (1, 1, 2));
+    assert_eq!(cmds[2].arg3, 1); assert_eq!(cmds[3].arg3, NOWHERE as i32);
 }
