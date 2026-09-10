@@ -214,8 +214,10 @@ pub fn create_world_index(g: &mut Game, znum: i32, type_: &str) {
         g.mudlog(MudlogKind::Brf, LVL_IMPL, true, &msg);
         return;
     }
-    let _ = std::fs::remove_file(&old_name);
-    let _ = std::fs::rename(&new_name, &old_name);
+    if let Err(e) = std::fs::rename(&new_name, &old_name) {
+        let msg = format!("SYSERR: OLC: Failed to install {}: {}", old_name.display(), e);
+        g.mudlog(MudlogKind::Brf, LVL_IMPL, true, &msg);
+    }
 }
 
 /// Rewrite one index file without `<znum>.<type>`'s line. `complain` is false
@@ -255,7 +257,6 @@ fn strip_index_entry(g: &mut Game, dir: &std::path::Path, index_name: &str, znum
         g.mudlog(MudlogKind::Brf, LVL_IMPL, true, &msg);
         return false;
     }
-    let _ = std::fs::remove_file(&old_name);
     if std::fs::rename(&new_name, &old_name).is_err() {
         let msg = format!("SYSERR: OLC: Failed to install {}.", old_name.display());
         g.mudlog(MudlogKind::Brf, LVL_IMPL, true, &msg);

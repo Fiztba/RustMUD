@@ -1080,23 +1080,14 @@ fn trigedit_write_zone(g: &mut Game, zrnum: usize, invis_lev: i16) -> bool {
         return false;
     }
 
-    // Try the replace before removing the target. Where rename overwrites, a
-    // failure leaves the old file exactly where it was; removing first means a
-    // failed rename has already thrown the zone's triggers away with nothing
-    // put back. Platforms that cannot overwrite still get their remove, on the
-    // retry.
-    if std::fs::rename(&newname, &oldname).is_err() {
-        let _ = std::fs::remove_file(&oldname);
-        if let Err(e) = std::fs::rename(&newname, &oldname) {
-            let msg = format!(
-                "SYSERR: OLC: Can't rename \"{}\" to \"{}\": {}",
-                newname.display(),
-                oldname.display(),
-                e
-            );
-            g.mudlog(MudlogKind::Brf, level, true, &msg);
-            return false;
-        }
+    // Replacing directly preserves the old file if installing the new one fails.
+    if let Err(e) = std::fs::rename(&newname, &oldname) {
+        let msg = format!(
+            "SYSERR: OLC: Can't rename \"{}\" to \"{}\": {}",
+            newname.display(), oldname.display(), e
+        );
+        g.mudlog(MudlogKind::Brf, level, true, &msg);
+        return false;
     }
 
     crate::olc::genzon::create_world_index(g, zone as i32, "trg");
