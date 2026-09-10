@@ -58,14 +58,24 @@ fn item_location(g: &Game, oid: ObjId) -> Option<(Option<CharId>, Option<ObjId>,
 // ---- put ----
 
 fn perform_put(g: &mut Game, chid: CharId, oid: ObjId, cont: ObjId) {
-    if g.try_obj(cont).is_none() || !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) { return; }
+    let Some(ch) = g.try_ch(chid) else { return };
+    let room = ch.in_room;
+    let Some(container) = g.try_obj(cont) else { return };
+    if !(container.carried_by == Some(chid) || (room != NOWHERE && container.in_room == room))
+        || container.type_flag != flags::ITEM_CONTAINER
+        || (container.values[1] & flags::CONT_CLOSED != 0 && (ch.level < LVL_IMMORT || !ch.prf(flags::PRF_NOHASSLE)))
+        || ch.act.is_set(if ch.is_npc() { flags::MOB_NOTDEADYET } else { flags::PLR_NOTDEADYET })
+        || !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) { return; }
+    let container_state = (container.in_room, container.carried_by, container.type_flag, container.values[1]);
     let object_id = crate::dg::obj_script_id(g, oid);
     if crate::dg::triggers::drop_otrigger(g, oid, chid) == 0 {
         return;
     }
     // Object might be extracted by drop_otrigger.
     if !crate::dg::has_obj_by_uid_in_lookup_table(g, object_id) || !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid))
-        || g.try_obj(cont).is_none() {
+        || !g.try_ch(chid).is_some_and(|ch| ch.in_room == room
+            && !ch.act.is_set(if ch.is_npc() { flags::MOB_NOTDEADYET } else { flags::PLR_NOTDEADYET }))
+        || !g.try_obj(cont).is_some_and(|o| (o.in_room, o.carried_by, o.type_flag, o.values[1]) == container_state) {
         return;
     }
     let cont_v0 = g.obj(cont).values[0];
