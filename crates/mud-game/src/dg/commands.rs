@@ -92,8 +92,12 @@ pub fn do_attach(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subc
             send_to_char(g, chid, b"Players can't have scripts.\r\n");
             return;
         }
-        let my_zone = zone_of_room(g, g.ch(chid).in_room);
-        if !can_edit_zone(g, chid, my_zone) {
+        let zone = if g.ch(victim).is_npc() {
+            real_zone_by_thing(g, super::mob_vnum(g, victim))
+        } else {
+            zone_of_room(g, g.ch(chid).in_room)
+        };
+        if !can_edit_zone(g, chid, zone) {
             send_to_char(g, chid, b"You can only attach triggers in your own zone.\r\n");
             return;
         }
@@ -143,8 +147,8 @@ pub fn do_attach(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subc
             send_to_char(g, chid, b"That object does not exist.\r\n");
             return;
         };
-        let my_zone = zone_of_room(g, g.ch(chid).in_room);
-        if !can_edit_zone(g, chid, my_zone) {
+        let zone = real_zone_by_thing(g, super::obj_vnum(g, object));
+        if !can_edit_zone(g, chid, zone) {
             send_to_char(g, chid, b"You can only attach triggers in your own zone.\r\n");
             return;
         }
