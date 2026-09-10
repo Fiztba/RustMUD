@@ -72,8 +72,14 @@ fn live_and_menu_scripts_follow_trigger_edits() {
     let mob = mud_game::db::read_mobile(g, 0).unwrap();
     mud_game::handler::char_to_room(g, mob, 0);
     save_trigger(g, di, 3098, MTRIG_RANDOM);
+    save_trigger(g, di, 3099, MTRIG_GREET);
     for owner in [GoId::Char(mob), GoId::Char(menu)] {
-        let t = read_trigger(g, g.world.real_trigger(3098).unwrap()).unwrap();
+        let mut t = read_trigger(g, g.world.real_trigger(3098).unwrap()).unwrap();
+        let event_id = t.iid;
+        t.wait_event = Some(event_id);
+        g.queue_event(100, mud_game::game::EventKind::TrigWait { go: owner, iid: t.iid, event_id });
+        add_trigger_at(g.ensure_script(owner), t, -1);
+        let t = read_trigger(g, g.world.real_trigger(3099).unwrap()).unwrap();
         add_trigger_at(g.ensure_script(owner), t, -1);
         add_var(&mut g.ensure_script(owner).global_vars, b"saved", b"keep", 17);
     }
@@ -81,7 +87,10 @@ fn live_and_menu_scripts_follow_trigger_edits() {
     for owner in [GoId::Char(mob), GoId::Char(menu)] {
         assert!(g.script_check(owner, MTRIG_COMMAND));
         assert!(!g.script_check(owner, MTRIG_RANDOM));
+        assert!(g.script_check(owner, MTRIG_GREET));
+        assert!(g.script_of(owner).unwrap().trig_list[0].wait_event.is_none());
     }
+    assert!(!g.events.iter().any(|e| matches!(e.kind, mud_game::game::EventKind::TrigWait { go: GoId::Char(c), .. } if c == mob || c == menu)));
     g.ch_mut(builder).level = 10;
     assert!(mud_game::dg::triggers::command_mtrigger(g, builder, b"probe", b""));
     g.ch_mut(builder).level = LVL_IMPL;
@@ -91,6 +100,12 @@ fn live_and_menu_scripts_follow_trigger_edits() {
         assert_eq!(g.script_of(owner).unwrap().trig_list[0].nr, g.world.real_trigger(3098).unwrap());
     }
     let rnum = g.world.real_trigger(3098).unwrap();
+    assert!(delete_trigger(g, rnum));
+    for owner in [GoId::Char(mob), GoId::Char(menu)] {
+        assert_eq!(g.script_of(owner).unwrap().types, MTRIG_GREET);
+        assert_eq!(g.script_of(owner).unwrap().trig_list.len(), 1);
+    }
+    let rnum = g.world.real_trigger(3099).unwrap();
     assert!(delete_trigger(g, rnum));
     for owner in [GoId::Char(mob), GoId::Char(menu)] {
         let sc = g.script_of(owner).expect("deleting a trigger erased persistent variables");
@@ -121,4 +136,19 @@ fn copied_triggers_and_attachment_positions_are_saved() {
     olc.script_mode = SCRIPT_NEW_TRIGGER;
     dg_script_edit_parse(g, di, &mut olc, b"2, 3098");
     assert_eq!(olc.script, Some(vec![3097,3098,3099]));
+    for position in 1..=5 {
+        olc.script = Some(vec![3097,3099]);
+        olc.script_mode = SCRIPT_NEW_TRIGGER;
+        dg_script_edit_parse(g, di, &mut olc, format!("{position}, 3098").as_bytes());
+        let mut expected = vec![3097,3099];
+        expected.insert((position - 1).min(2), 3098);
+        assert_eq!(olc.script, Some(expected));
+    }
+    for kind in [-1, 0, 1, 2, 3, i32::MAX, i32::MIN] {
+        let mut editing = Box::new(OlcData::default());
+        editing.mode = TRIGEDIT_INTENDED;
+        editing.trig = Some(Box::new(mud_world::model::Trigger { attach_type: OBJ_TRIGGER, ..Default::default() }));
+        let editing = trigedit_parse(g, di, editing, kind.to_string().as_bytes()).unwrap();
+        assert_eq!(editing.trig.unwrap().attach_type, if (0..=2).contains(&kind) { kind } else { OBJ_TRIGGER });
+    }
 }
