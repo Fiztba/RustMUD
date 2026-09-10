@@ -199,6 +199,13 @@ pub fn generic_complete_quest(g: &mut Game, chid: CharId) {
     };
     let done = g.world.quests[rnum].done.clone().unwrap_or_default();
 
+    // Receiving a reward object runs quest checks too. Finish this stage
+    // before granting rewards so those checks cannot complete it again.
+    if qflags & AQ_REPEATABLE == 0 {
+        add_completed_quest(g, chid, vnum);
+    }
+    clear_quest(g, chid);
+
     let happy = crate::act::other::is_happyhour(g);
     let awarded_qp = if happy && g.happy.qp_rate > 0 {
         happy_scale(points, g.happy.qp_rate)
@@ -253,11 +260,6 @@ pub fn generic_complete_quest(g: &mut Game, chid: CharId) {
             }
         }
     }
-
-    if qflags & AQ_REPEATABLE == 0 {
-        add_completed_quest(g, chid, vnum);
-    }
-    clear_quest(g, chid);
 
     if let Some(nrnum) = real_quest(g, next_quest) {
         if next_quest != vnum && !is_complete(g, chid, next_quest) {
@@ -315,6 +317,9 @@ pub fn autoquest_trigger_check(
                 return;
             }
             for i in g.rooms[room as usize].people.clone() {
+                if g.ch(chid).ps().current_quest != cur {
+                    break;
+                }
                 if g.try_ch(i).is_some_and(|c| c.is_npc()) && target == crate::dg::mob_vnum(g, i) {
                     generic_complete_quest(g, chid);
                 }
