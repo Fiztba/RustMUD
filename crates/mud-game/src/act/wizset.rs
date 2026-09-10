@@ -670,7 +670,9 @@ pub fn change_player_name(g: &mut Game, chid: CharId, vict: CharId, new_name: &[
         send_to_char(g, chid, b"Invalid new name.\r\n");
         return false;
     }
-    if crate::handler::get_player_vis(g, chid, new_name, false).is_some() {
+    if g.player_table.iter().any(|p| p.name.eq_ignore_ascii_case(new_name))
+        || crate::handler::get_player_vis(g, chid, new_name, false).is_some()
+    {
         send_to_char(g, chid, b"Sorry, the new name already exists.\r\n");
         return false;
     }
