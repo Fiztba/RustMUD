@@ -109,6 +109,11 @@ fn num_pc_in_room(g: &Game, room: RoomRnum) -> i32 {
         .count() as i32
 }
 
+fn move_still_in_room(g: &Game, chid: CharId, room: RoomRnum) -> bool {
+    g.try_ch(chid).is_some_and(|ch| ch.in_room == room
+        && !ch.mob_flagged(flags::MOB_NOTDEADYET) && !ch.plr(flags::PLR_NOTDEADYET))
+}
+
 pub fn do_simple_move(g: &mut Game, chid: CharId, dir: usize, need_specials_check: bool) -> bool {
     let was_in = g.ch(chid).in_room;
     let Some(exit) = g.world.rooms[was_in as usize].dir_option[dir].as_deref() else {
@@ -237,14 +242,19 @@ pub fn do_simple_move(g: &mut Game, chid: CharId, dir: usize, need_specials_chec
         msg.push(b'.');
         act(g, &msg, true, Some(chid), None, None, comm::TO_ROOM);
     }
+    if !move_still_in_room(g, chid, was_in) { return false; }
     char_from_room(g, chid);
     char_to_room(g, chid, going_to);
+    if !move_still_in_room(g, chid, going_to) { return false; }
 
-    // Move them first, then move them back if they aren't allowed to go
-    // (entry_mtrigger can teleport them away) —.
-    if crate::dg::triggers::entry_mtrigger(g, chid) == 0
-        || crate::dg::triggers::enter_wtrigger(g, going_to, chid, dir as i32) == 0
-    {
+    // Roll back a denied entry only while the original move still owns the location.
+    let mut allowed = crate::dg::triggers::entry_mtrigger(g, chid) != 0;
+    if !move_still_in_room(g, chid, going_to) { return false; }
+    if allowed {
+        allowed = crate::dg::triggers::enter_wtrigger(g, going_to, chid, dir as i32) != 0;
+        if !move_still_in_room(g, chid, going_to) { return false; }
+    }
+    if !allowed {
         char_from_room(g, chid);
         char_to_room(g, chid, was_in);
         return false;
@@ -253,6 +263,7 @@ pub fn do_simple_move(g: &mut Game, chid: CharId, dir: usize, need_specials_chec
     if !g.ch(chid).aff(flags::AFF_SNEAK) {
         act(g, b"$n has arrived.", true, Some(chid), None, None, comm::TO_ROOM);
     }
+    if !move_still_in_room(g, chid, going_to) { return false; }
     if g.ch(chid).desc.is_some() {
         look_at_room(g, chid, false);
     }
@@ -269,7 +280,10 @@ pub fn do_simple_move(g: &mut Game, chid: CharId, dir: usize, need_specials_chec
         return false;
     }
     crate::dg::triggers::entry_memory_mtrigger(g, chid);
-    if !crate::dg::triggers::greet_mtrigger(g, chid, dir as i32) {
+    if !move_still_in_room(g, chid, going_to) { return false; }
+    let greeted = crate::dg::triggers::greet_mtrigger(g, chid, dir as i32);
+    if !move_still_in_room(g, chid, going_to) { return false; }
+    if !greeted {
         char_from_room(g, chid);
         char_to_room(g, chid, was_in);
         look_at_room(g, chid, false);
