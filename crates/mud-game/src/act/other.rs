@@ -30,8 +30,7 @@ pub fn do_quit(g: &mut Game, chid: CharId, _arg: &[u8], _cmd: usize, subcmd: i32
     }
     if g.ch(chid).position < POS_STUNNED {
         send_to_char(g, chid, b"You die before your time...\r\n");
-        // die arrives with combat (stage 4); extraction still happens.
-        crate::handler::extract_char(g, chid);
+        crate::fight::die(g, chid, None);
         return;
     }
     act(g, b"$n has left the game.", true, Some(chid), None, None, comm::TO_ROOM);
