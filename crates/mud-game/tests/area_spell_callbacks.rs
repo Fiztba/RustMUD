@@ -83,3 +83,40 @@ fn casting_message_teleport_does_not_damage_the_new_room() {
     assert_eq!(g.ch(actor).in_room, 2);
     assert_eq!(g.ch(target).points.hit, 1000);
 }
+
+fn damage_callback_case(move_caster: bool, move_target: bool) {
+    let mut f = fixture(&format!("damage-{move_caster}-{move_target}")); let g = &mut f.game;
+    let actor = player(g, b"Caster", 12345); g.character_list.push_back(actor);
+    char_to_room(g, actor, 0); descriptor(g, actor, ConState::Playing);
+    for room in 0..3 { g.world.rooms[room].room_flags = [0;4]; g.rooms[room].light = 1; }
+    let first = mud_game::db::read_mobile(g, 0).unwrap();
+    let later = mud_game::db::read_mobile(g, 0).unwrap();
+    for mob in [first, later] {
+        g.ch_mut(mob).act = flags::FlagSet::EMPTY; g.ch_mut(mob).act.set(flags::MOB_ISNPC);
+        g.ch_mut(mob).affected_by = Default::default(); g.ch_mut(mob).script = None;
+        g.ch_mut(mob).points.hit = 1000; g.ch_mut(mob).points.max_hit = 1000;
+        char_to_room(g, mob, 0);
+    }
+    // Make callback ordering explicit rather than depending on insertion order.
+    g.rooms[0].people = vec![actor, first, later];
+    let mut cmds = vec![];
+    if move_caster { cmds.push(format!("mteleport %actor% {}", g.world.rooms[2].vnum).into_bytes()); }
+    if move_target {
+        let uid = dg::char_script_id(g, later);
+        cmds.push(format!("mteleport }}{uid} {}", g.world.rooms[2].vnum).into_bytes());
+    }
+    let nr = g.world.triggers.len() as u16;
+    g.world.triggers.push(mud_world::model::Trigger {
+        vnum: 64000, attach_type: dg::MOB_TRIGGER, trigger_type: dg::MTRIG_DAMAGE,
+        narg: 100, cmdlist: cmds, ..Default::default()
+    });
+    let t = dg::read_trigger(g, nr).unwrap(); dg::add_trigger_at(g.ensure_script(GoId::Char(first)), t, -1);
+    mud_game::magic::mag_areas(g, 10, actor, mud_data::spells::SPELL_EARTHQUAKE, mud_data::spells::SAVING_SPELL);
+    assert_eq!(g.ch(actor).in_room, if move_caster { 2 } else { 0 });
+    assert_eq!(g.ch(later).in_room, if move_target { 2 } else { 0 });
+    if move_caster || move_target { assert_eq!(g.ch(later).points.hit, 1000); }
+    else { assert!(g.ch(later).points.hit < 1000); }
+}
+#[test] fn damage_callback_redirecting_caster_stops_remaining_targets() { damage_callback_case(true, false); }
+#[test] fn damage_callback_redirecting_later_target_skips_it() { damage_callback_case(false, true); }
+#[test] fn unchanged_area_spell_damages_later_targets() { damage_callback_case(false, false); }
