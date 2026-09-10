@@ -1681,6 +1681,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn line_change_capacity_matrix_is_atomic() {
+        for original in [b"".as_slice(), b"one".as_slice(), b"one\r\n".as_slice(), b"one\r\ntwo\r\n".as_slice()] {
+            let starts: Vec<usize> = std::iter::once(0).chain(original.iter().enumerate().filter(|(_, b)| **b == b'\n').map(|(i, _)| i + 1)).collect();
+            for (line, &pos) in starts.iter().enumerate() {
+                for replacement in ["", "x", "longer replacement"] {
+                    for operation in ['e', 'i'] {
+                        let end = if operation == 'i' { pos } else { original[pos..].iter().position(|&b| b == b'\n').map_or(original.len(), |n| pos + n + 1) };
+                        let mut expected = original[..pos].to_vec();
+                        expected.extend_from_slice(replacement.as_bytes()); expected.extend_from_slice(b"\r\n"); expected.extend_from_slice(&original[end..]);
+                        for capacity in 0..=expected.len() + 2 {
+                            let mut eb = EditBuf { buf: Some(original.to_vec()), max_str: capacity };
+                            let command = format!("/{operation} {} {replacement}", line + 1);
+                            add(&mut eb, command.as_bytes());
+                            let want = if expected.len() < capacity { expected.as_slice() } else { original };
+                            assert_eq!(buf(&eb), want, "op={operation} line={line} capacity={capacity}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // -- /e and /i -----------------------------------------------------------
 
     #[test]
