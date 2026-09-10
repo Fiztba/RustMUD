@@ -101,3 +101,19 @@ fn all_files_case(locked: bool) {
 #[test] fn successful_rename_moves_all_four_files() { all_files_case(false); }
 #[cfg(windows)]
 #[test] fn later_file_failure_rolls_back_earlier_move() { all_files_case(true); }
+
+#[test]
+fn indexed_names_remain_reserved_when_the_player_file_is_missing() {
+    let mut f = fixture("indexed-name"); let g = &mut f.game;
+    let actor = player(g, b"Admin", 12345); let victim = player(g, b"Oldname", 12346);
+    descriptor(g, actor, ConState::Playing);
+    for (name, id) in [(b"oldname".as_slice(), 12346), (b"newname".as_slice(), 12347)] {
+        g.player_table.push(mud_game::game::PlayerIndexElement {
+            name: name.to_vec(), id, level: 10, flags: 0, last: g.now,
+        });
+    }
+    assert!(!mud_game::act::wizset::change_player_name(g, actor, victim, b"Newname"));
+    assert_eq!(g.ch(victim).get_name(), b"Oldname");
+    assert_eq!(g.player_table.iter().find(|p| p.id == 12346).unwrap().name, b"oldname");
+    assert_eq!(g.player_table.iter().find(|p| p.id == 12347).unwrap().name, b"newname");
+}
