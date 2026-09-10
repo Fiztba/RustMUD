@@ -305,13 +305,24 @@ pub fn do_export_zone(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, 
     // many: zone 655 reaches vnum 65599 and only its first 35 slots fit.
     if let Some(t) = target {
         let bot = if zone_rnum == 0 { 0 } else { g.world.zones[zone_rnum].bot };
-        let highest = t * 100 + (g.world.zones[zone_rnum].top as i64 - bot as i64);
-        if highest >= Idx::MAX as i64 {
-            let msg = format!(
-                "Zone {t} would put this zone's highest vnum at {highest}, and no vnum \
-                 above {} can be stored.\r\n",
-                Idx::MAX as i64 - 1
-            );
+        let span = g.world.zones[zone_rnum].top as i64 - bot as i64;
+        // `t` is whatever `atol` made of the digits typed, so a 17-digit
+        // target overflows `t * 100` in an `i64`. Checked arithmetic turns
+        // that into a refusal instead of a panic, or a wrapped-negative value
+        // that would slip under the ceiling.
+        let highest = t.checked_mul(100).and_then(|v| v.checked_add(span));
+        if highest.is_none_or(|h| h >= Idx::MAX as i64) {
+            let ceiling = Idx::MAX as i64 - 1;
+            let msg = match highest {
+                Some(highest) => format!(
+                    "Zone {t} would put this zone's highest vnum at {highest}, and no vnum \
+                     above {ceiling} can be stored.\r\n"
+                ),
+                None => format!(
+                    "Zone {t} is far too large to be a target zone; no vnum above {ceiling} \
+                     can be stored.\r\n"
+                ),
+            };
             send_to_char(g, chid, msg.as_bytes());
             return;
         }
