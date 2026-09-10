@@ -51,16 +51,26 @@ fn remote_creates_variable_storage_on_targets_without_triggers() {
             GoId::Obj(o) => dg::obj_script_id(g, o),
             GoId::Room(r) => dg::room_script_id(g, r),
         };
+      for context in [7, 8] {
         let nr = g.world.triggers.len() as u16;
         g.world.triggers.push(mud_world::model::Trigger {
             vnum: 65000, attach_type: dg::WLD_TRIGGER,
-            cmdlist: vec![b"set marker 42".to_vec(), format!("remote marker {uid}").into_bytes()],
+            cmdlist: vec![format!("context {context}").into_bytes(), b"set marker 42".to_vec(),
+                format!("remote marker {uid}").into_bytes(), b"set marker 43".to_vec(), format!("remote marker {uid}").into_bytes()],
             ..Default::default()
         });
         let trigger = dg::read_trigger(g, nr).unwrap(); let iid = trigger.iid;
         dg::add_trigger_at(g.ensure_script(GoId::Room(1)), trigger, -1);
         dg::driver::script_driver(g, GoId::Room(1), iid, dg::TRIG_NEW);
         let vars = &g.script_of(target).expect("remote discarded variable for a target without scripts").global_vars;
-        assert!(vars.iter().any(|v| v.name == b"marker" && v.value == b"42"));
+        let expected_context = if target == GoId::Char(pc) { 0 } else { context };
+        assert!(vars.iter().any(|v| v.name == b"marker" && v.value == b"43" && v.context == expected_context), "target {target:?}, context {context}: {vars:?}");
+        assert_eq!(vars.iter().filter(|v| v.name == b"marker").count(), if context == 8 && target != GoId::Char(pc) { 2 } else { 1 });
+        if context == 7 {
+            dg::add_var(&mut g.ensure_script(target).global_vars, b"keep", b"unchanged", 0);
+        } else {
+            assert!(vars.iter().any(|v| v.name == b"keep" && v.value == b"unchanged"));
+        }
+      }
     }
 }
