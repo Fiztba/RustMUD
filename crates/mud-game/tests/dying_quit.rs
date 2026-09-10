@@ -47,18 +47,26 @@ fn descriptor(g: &mut Game, ch: mud_data::ids::CharId, state: ConState) -> usize
     di
 }
 
-#[test]
-fn quitting_while_dying_runs_death_penalties_and_creates_a_corpse() {
-    let mut f = fixture("death"); let g = &mut f.game;
+fn quit_case(position: u8) {
+    let mut f = fixture(&format!("position-{position}")); let g = &mut f.game;
     let actor = player(g, b"Dying", 12345); g.character_list.push_back(actor);
     mud_game::handler::char_to_room(g, actor, 0); descriptor(g, actor, ConState::Playing);
-    g.ch_mut(actor).points.hit = -5; g.ch_mut(actor).position = POS_INCAP;
+    g.ch_mut(actor).points.hit = -5; g.ch_mut(actor).position = position;
     g.ch_mut(actor).points.exp = 1000;
     let mut obj = mud_game::obj::create_obj(); obj.name = Some(b"keepsake".to_vec());
     let item = g.objs.insert(obj); mud_game::handler::obj_to_char(g, item, actor);
     mud_game::act::other::do_quit(g, actor, b"", 0, mud_game::interpreter::SCMD_QUIT);
-    assert!(g.ch(actor).points.exp < 1000);
-    let corpse = g.obj(item).in_obj.expect("possessions should be placed in the corpse");
-    assert!(mud_game::handler::is_corpse(g, corpse));
-    assert_eq!(g.obj(corpse).in_room, 0);
+    if position < POS_STUNNED {
+        assert!(g.ch(actor).points.exp < 1000);
+        let corpse = g.obj(item).in_obj.expect("possessions should be placed in the corpse");
+        assert!(mud_game::handler::is_corpse(g, corpse));
+        assert_eq!(g.obj(corpse).in_room, 0);
+    } else {
+        assert_eq!(g.ch(actor).points.exp, 1000);
+        assert!(g.try_obj(item).is_none_or(|o| o.in_obj.is_none()));
+    }
 }
+
+#[test] fn incapacitated_quit_uses_death_handling() { quit_case(POS_INCAP); }
+#[test] fn mortally_wounded_quit_uses_death_handling() { quit_case(POS_MORTALLYW); }
+#[test] fn stunned_quit_keeps_normal_quit_behavior() { quit_case(POS_STUNNED); }
