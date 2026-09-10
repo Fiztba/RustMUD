@@ -37,8 +37,17 @@ pub fn do_action(g: &mut Game, chid: CharId, argument: &[u8], cmd: usize, _subcm
 
     let vict = get_char_room_vis(g, chid, &buf, None);
     let Some(vict) = vict else {
-        // Object socials (char_obj_found) search inventory then room —
-        // stage 3 items make these findable; the not-found path applies now.
+        if let Some(msg) = &action.char_obj_found {
+            let (_, _, object) = crate::handler::generic_find(g, chid, &buf,
+                crate::handler::FIND_OBJ_INV | crate::handler::FIND_OBJ_ROOM);
+            if let Some(object) = object {
+                act(g, msg, false, Some(chid), Some(object), None, comm::TO_CHAR | comm::TO_SLEEP);
+                if let Some(msg) = &action.others_obj_found {
+                    act(g, msg, action.hide != 0, Some(chid), Some(object), None, comm::TO_ROOM);
+                }
+                return;
+            }
+        }
         if let Some(msg) = &action.not_found {
             let mut m = msg.clone();
             m.extend_from_slice(b"\r\n");
@@ -86,15 +95,14 @@ pub fn do_action(g: &mut Game, chid: CharId, argument: &[u8], cmd: usize, _subcm
     } else {
         (action.char_found.clone(), action.others_found.clone(), action.vict_found.clone())
     };
-    // Body-part socials pass the part via $T (the vict_obj string); the
-    // shipped socials.new uses $m/$M forms, so the simple triple works.
+    let target = if body { comm::ActArg::CharText(vict, &buf2) } else { comm::ActArg::Char(vict) };
     if let Some(msg) = char_msg {
-        act(g, &msg, false, Some(chid), None, Some(vict), comm::TO_CHAR | comm::TO_SLEEP);
+        comm::act_full(g, &msg, false, Some(chid), None, target, comm::TO_CHAR | comm::TO_SLEEP);
     }
     if let Some(msg) = others_msg {
-        act(g, &msg, action.hide != 0, Some(chid), None, Some(vict), comm::TO_NOTVICT);
+        comm::act_full(g, &msg, action.hide != 0, Some(chid), None, target, comm::TO_NOTVICT);
     }
     if let Some(msg) = vict_msg {
-        act(g, &msg, action.hide != 0, Some(chid), None, Some(vict), comm::TO_VICT);
+        comm::act_full(g, &msg, action.hide != 0, Some(chid), None, target, comm::TO_VICT);
     }
 }
