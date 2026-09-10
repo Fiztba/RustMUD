@@ -82,6 +82,23 @@ fn attach_case(object: bool) {
     assert_eq!(g.script_of(target).unwrap().trig_list.len(), 1);
     dg::commands::do_detach(g, actor, format!("{kind} zonetarget all").as_bytes(), 0, 0);
     assert!(g.script_of(target).is_none());
+    for access in ["named", "senior", "all"] {
+        g.ch_mut(actor).level = LVL_GOD;
+        g.ch_mut(actor).ps_mut().olc_zone = NOWHERE as i32;
+        g.world.zones[zone].builders = None;
+        match access {
+            "named" => g.world.zones[zone].builders = Some(b"Builder".to_vec()),
+            "senior" => g.ch_mut(actor).level = LVL_GRGOD,
+            _ => g.ch_mut(actor).ps_mut().olc_zone = 666,
+        }
+        dg::commands::do_attach(g, actor, args.as_bytes(), 0, 0);
+        assert_eq!(g.script_of(target).unwrap().trig_list.len(), 1, "access {access}");
+        dg::extract_script(g, target);
+    }
+    g.ch_mut(actor).level = LVL_IMPL;
+    g.world.zones[zone].zone_flags[flags::ZONE_NOBUILD / 32] |= 1 << (flags::ZONE_NOBUILD % 32);
+    dg::commands::do_attach(g, actor, args.as_bytes(), 0, 0);
+    assert!(g.script_of(target).is_none(), "NOBUILD target zone must remain protected");
 }
 #[test]
 fn mobile_attachment_checks_the_mobile_zone() { attach_case(false); }
