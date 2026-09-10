@@ -754,7 +754,6 @@ pub fn do_advance(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _sub
     let oldlevel = g.ch(victim).level as i32;
     if newlevel < oldlevel {
         crate::login::do_start(g, victim);
-        g.ch_mut(victim).level = newlevel as u8;
         send_to_char(
             g,
             victim,
