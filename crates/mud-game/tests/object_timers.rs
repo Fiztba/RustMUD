@@ -83,6 +83,31 @@ fn script_timers_tick_once_in_every_object_location() {
         }
         for oid in objects { handler::extract_obj(g, oid); }
     }
+
+    // Corpse aging remains accelerated, while an item inside one keeps
+    // its own timer and survives the corpse's decay.
+    let corpse = object(g, flags::ITEM_CONTAINER);
+    g.obj_mut(corpse).values[3] = 1;
+    g.obj_mut(corpse).timer = 2;
+    handler::obj_to_char(g, corpse, ch);
+    let child = object(g, flags::ITEM_TREASURE);
+    g.obj_mut(child).timer = 2;
+    let trigger = dg::read_trigger(g, nr).unwrap();
+    dg::add_trigger_at(g.ensure_script(GoId::Obj(child)), trigger, -1);
+    dg::add_var(&mut g.ensure_script(GoId::Obj(child)).global_vars, b"fires", b"0", 0);
+    handler::obj_to_obj(g, child, corpse);
+    let worn_corpse = object(g, flags::ITEM_CONTAINER);
+    g.obj_mut(worn_corpse).values[3] = 1;
+    g.obj_mut(worn_corpse).timer = 1;
+    assert!(handler::equip_char(g, ch, worn_corpse, WEAR_HOLD));
+    limits::point_update(g);
+    assert!(g.try_obj(corpse).is_none());
+    assert!(g.try_obj(worn_corpse).is_none());
+    assert_eq!(g.obj(child).in_room, 0);
+    assert_eq!(g.obj(child).timer, 1);
+    limits::point_update(g);
+    let vars = &g.script_of(GoId::Obj(child)).unwrap().global_vars;
+    assert_eq!(vars.iter().find(|v| v.name == b"fires").unwrap().value, b"1");
 }
 
 
