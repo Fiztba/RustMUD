@@ -484,7 +484,7 @@ fn process_remote(g: &mut Game, ctx: DgCtx, cmd: &[u8]) {
             context = 0;
         }
     }
-    let Some(sc_remote) = g.script_of_mut(target) else { return };
+    let sc_remote = g.ensure_script(target);
     add_var(&mut sc_remote.global_vars, &vd.name, &vd.value, context);
 }
 
