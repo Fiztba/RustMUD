@@ -328,6 +328,57 @@ pub fn count_commands(zone: &Zone) -> usize {
     zone.cmds.len()
 }
 
+/// Remove a deleted prototype's resets and the commands using their implicit
+/// mob/object targets, then shift surviving references to the shortened table.
+/// `mobile` selects the mobile table; false selects the object table.
+pub fn remove_prototype_resets(zone: &mut Zone, rnum: Idx, mobile: bool) -> bool {
+    let mut changed = false;
+    let (mut mob_removed, mut tmob_removed, mut tobj_removed) = (false, false, false);
+    let mut previous_removed = false;
+    zone.cmds.retain_mut(|cmd| {
+        let mut remove = cmd.if_flag != 0 && previous_removed;
+        let refs: Vec<&mut i32> = match cmd.command {
+            b'M' if mobile => vec![&mut cmd.arg1],
+            b'P' if !mobile => vec![&mut cmd.arg1, &mut cmd.arg3],
+            b'O' | b'G' | b'E' if !mobile => vec![&mut cmd.arg1],
+            b'R' if !mobile => vec![&mut cmd.arg2],
+            _ => Vec::new(),
+        };
+        remove |= refs.iter().any(|value| **value == rnum as i32);
+        for value in refs {
+            if *value > rnum as i32 && *value != NOTHING as i32 {
+                *value -= 1;
+                changed = true;
+            }
+        }
+        match cmd.command {
+            b'M' => {
+                mob_removed = remove;
+                tmob_removed = remove;
+                tobj_removed = remove;
+            }
+            b'O' | b'P' | b'G' | b'E' => {
+                remove |= matches!(cmd.command, b'G' | b'E') && mob_removed;
+                tobj_removed = remove;
+                tmob_removed = remove;
+            }
+            b'T' | b'V' => {
+                remove |= (cmd.arg1 == crate::dg::MOB_TRIGGER && tmob_removed)
+                    || (cmd.arg1 == crate::dg::OBJ_TRIGGER && tobj_removed);
+            }
+            b'D' | b'R' => {
+                tmob_removed = remove;
+                tobj_removed = remove;
+            }
+            _ => {}
+        }
+        previous_removed = remove;
+        changed |= remove;
+        !remove
+    });
+    changed
+}
+
 /// add_cmd_to_list.
 ///
 /// Copying into a fresh `count + 2` array with

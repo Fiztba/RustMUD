@@ -34,6 +34,29 @@ fn command(kind: u8, arg1: i32, arg2: i32, arg3: i32) -> ZoneCommand {
 }
 
 #[test]
+fn reset_dependencies_do_not_cross_deleted_loads() {
+    use mud_game::{dg, olc::genzon::remove_prototype_resets};
+    let mut conditional_door = command(b'D', 0, 0, 0);
+    conditional_door.if_flag = 1;
+    let mut zone = mud_world::model::Zone::default();
+    zone.cmds = vec![
+        command(b'M', 0, 1, 0), command(b'G', 0, 1, 0),
+        command(b'O', 1, 1, 0), conditional_door,
+        command(b'T', dg::OBJ_TRIGGER, 0, 0),
+        command(b'T', dg::MOB_TRIGGER, 0, 0),
+        command(b'O', 2, 1, 0), command(b'T', dg::OBJ_TRIGGER, 0, 0),
+        command(b'R', 0, 1, 0), command(b'T', dg::OBJ_TRIGGER, 0, 0),
+        command(b'G', 2, 1, 0), command(b'P', 0, 1, NOTHING as i32),
+    ];
+    assert!(remove_prototype_resets(&mut zone, 1, false));
+    let commands: Vec<_> = zone.cmds.iter().map(|c| (c.command, c.arg1, c.arg3)).collect();
+    assert_eq!(commands, vec![
+        (b'M', 0, 0), (b'G', 0, 0), (b'O', 1, 0),
+        (b'T', dg::OBJ_TRIGGER, 0), (b'G', 1, 0), (b'P', 0, NOTHING as i32),
+    ]);
+}
+
+#[test]
 fn adding_an_object_keeps_unresolved_board_references() {
     let mut f = fixture("insert");
     let g = &mut f.game;
@@ -61,7 +84,7 @@ fn object_deletion_updates_every_reset_board_and_product_reference() {
     g.boards.rnum[1] = 2;
     for zone in &mut g.world.zones { zone.cmds.clear(); }
     g.world.zones[0].cmds = vec![
-        command(b'P', 2, 1, 1), command(b'M', 1, 1, 0),
+        command(b'P', 2, 1, 1), command(b'T', mud_game::dg::OBJ_TRIGGER, 0, 0), command(b'M', 1, 1, 0),
         command(b'O', 1, 1, 0), command(b'O', 1, 1, 0), command(b'O', 2, 1, 0),
         command(b'R', 0, 1, 0), command(b'R', 0, 2, 0), command(b'P', 2, 1, 2),
     ];
@@ -89,7 +112,11 @@ fn mobile_deletion_preserves_counts_until_pending_extraction() {
     g.shops_rt = vec![mud_game::shop::ShopRt { keeper: 0, ..Default::default() },
         mud_game::shop::ShopRt { keeper: 1, ..Default::default() }];
     for zone in &mut g.world.zones { zone.cmds.clear(); }
-    g.world.zones[0].cmds = vec![command(b'M', 0, 1, 0), command(b'M', 0, 1, 0), command(b'M', 1, 1, 0)];
+    g.world.zones[0].cmds = vec![
+        command(b'M', 0, 1, 0), command(b'M', 0, 1, 0),
+        command(b'T', mud_game::dg::MOB_TRIGGER, 0, 0), command(b'G', 1, 1, 0),
+        command(b'T', mud_game::dg::OBJ_TRIGGER, 0, 0), command(b'M', 1, 1, 0),
+    ];
     let counts = g.mob_counts[1..].to_vec();
     genmob::delete_mobile(g, 0).unwrap();
     assert_eq!(g.ch(mob).mob_rnum, NOBODY);

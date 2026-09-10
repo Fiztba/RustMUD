@@ -186,29 +186,10 @@ pub fn delete_mobile(g: &mut Game, refpt: Idx) -> Option<Idx> {
             }
         }
     }
-    // Zone 'M' commands: the ones loading this mob are removed outright.
-    // Revisit the shifted-in command after a delete. Changed zones also
-    // need writing back out.
-    let mut touched: Vec<Idx> = Vec::new();
-    for zi in 0..g.world.zones.len() {
-        let mut ci = 0usize;
-        let mut zone_touched = false;
-        while ci < g.world.zones[zi].cmds.len() {
-            let cmd = &mut g.world.zones[zi].cmds[ci];
-            if cmd.command == b'M' {
-                if cmd.arg1 == refpt as i32 {
-                    g.world.zones[zi].cmds.remove(ci);
-                    zone_touched = true;
-                    continue;
-                } else if cmd.arg1 > refpt as i32 {
-                    cmd.arg1 -= 1;
-                    zone_touched = true;
-                }
-            }
-            ci += 1;
-        }
-        if zone_touched {
-            touched.push(g.world.zones[zi].number);
+    let mut touched = Vec::new();
+    for zone in &mut g.world.zones {
+        if crate::olc::genzon::remove_prototype_resets(zone, refpt, true) {
+            touched.push(zone.number);
         }
     }
     for zvnum in touched {

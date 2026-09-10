@@ -251,30 +251,11 @@ pub fn delete_object(g: &mut Game, rnum: Idx) -> Option<Idx> {
         }
     }
 
-    // Process every original reset once, including adjacent deletions.
     let mut touched = Vec::new();
     for zone in &mut g.world.zones {
-        let mut changed = false;
-        zone.cmds.retain_mut(|cmd| {
-            let refs: Vec<&mut i32> = match cmd.command {
-                b'P' => vec![&mut cmd.arg1, &mut cmd.arg3],
-                b'O' | b'G' | b'E' => vec![&mut cmd.arg1],
-                b'R' => vec![&mut cmd.arg2],
-                _ => return true,
-            };
-            if refs.iter().any(|value| **value == rnum as i32) {
-                changed = true;
-                return false;
-            }
-            for value in refs {
-                if *value > rnum as i32 && *value != NOTHING as i32 {
-                    *value -= 1;
-                    changed = true;
-                }
-            }
-            true
-        });
-        if changed { touched.push(zone.number); }
+        if crate::olc::genzon::remove_prototype_resets(zone, rnum, false) {
+            touched.push(zone.number);
+        }
     }
     for zvnum in touched {
         add_to_save_list(g, zvnum, SL_ZON);
