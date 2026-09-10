@@ -63,6 +63,20 @@ fn world_object_search_does_not_recount_inventory_or_room_objects() {
     let (_, _, got) = generic_find(g, ch, b"3.reviewtarget", FIND_OBJ_INV | FIND_OBJ_ROOM | FIND_OBJ_WORLD);
     assert_eq!(got, Some(remote));
     let mut number = 4; assert_eq!(get_obj_vis_counted(g, ch, b"reviewtarget", &mut number), None); assert_eq!(number, 1);
+    let worn = object(g); equip_char(g, ch, worn, WEAR_HOLD);
+    for mask in 0..16 {
+        let flags = [(1, FIND_OBJ_EQUIP), (2, FIND_OBJ_INV), (4, FIND_OBJ_ROOM), (8, FIND_OBJ_WORLD)].into_iter().filter(|(bit, _)| mask & bit != 0).fold(0, |v, (_, flag)| v | flag);
+        let mut expected = Vec::new();
+        if mask & 1 != 0 { expected.push(worn); }
+        if mask & 2 != 0 { expected.push(carried); }
+        if mask & 4 != 0 { expected.push(room); }
+        if mask & 8 != 0 { for oid in [worn, carried, room, remote] { if !expected.contains(&oid) { expected.push(oid); } } }
+        for n in 1..=expected.len() + 1 {
+            let got = generic_find(g, ch, format!("{n}.reviewtarget").as_bytes(), flags).2;
+            assert_eq!(got, expected.get(n - 1).copied(), "mask={mask}, n={n}");
+        }
+    }
+    let mut last = FIND_INDEX_LAST; assert_eq!(get_obj_vis_counted(g, ch, b"reviewtarget", &mut last), Some(carried));
 }
 #[test]
 fn combined_character_and_object_searches_share_one_countdown() {
@@ -76,12 +90,23 @@ fn combined_character_and_object_searches_share_one_countdown() {
     assert_eq!(generic_find(g, ch, b"2.reviewtarget", domains).1, Some(remote));
     assert_eq!(generic_find(g, ch, b"3.reviewtarget", domains).2, Some(item));
     assert_eq!(generic_find(g, ch, b"4.reviewtarget", domains).0, 0);
+    for flags in [FIND_CHAR_WORLD, FIND_CHAR_ROOM | FIND_CHAR_WORLD] {
+        assert_eq!(generic_find(g, ch, b"1.reviewtarget", flags).1, Some(local));
+        assert_eq!(generic_find(g, ch, b"2.reviewtarget", flags).1, Some(remote));
+        assert_eq!(generic_find(g, ch, b"3.reviewtarget", flags).0, 0);
+    }
+    assert_eq!(get_char_world_vis(g, ch, b"last.reviewtarget", None), Some(local));
+    assert_eq!(get_char_world_vis(g, ch, b"2.reviewtarget", None), Some(remote));
 }
 #[test]
 fn zero_named_player_search_can_find_a_player_in_another_room() {
     let mut f = fixture("named"); let g = &mut f.game;
     let ch = player(g, b"Viewer", 12345); let target = player(g, b"Remote", 12346);
     mud_game::handler::char_to_room(g, ch, 0); mud_game::handler::char_to_room(g, target, 1);
+    descriptor(g, target, ConState::Playing);
     g.character_list.push_front(target); g.rooms[0].light = 1; g.rooms[1].light = 1;
     assert_eq!(mud_game::handler::get_char_world_vis(g, ch, b"0.Remote", None), Some(target));
+    let npc = mud_game::db::read_mobile(g, 0).unwrap(); g.ch_mut(npc).name = Some(b"Remote".to_vec()); mud_game::handler::char_to_room(g, npc, 0);
+    assert_eq!(mud_game::handler::get_char_world_vis(g, ch, b"0.REMOTE", None), Some(target));
+    assert_eq!(mud_game::handler::get_char_world_vis(g, ch, b"0.Rem", None), None);
 }
