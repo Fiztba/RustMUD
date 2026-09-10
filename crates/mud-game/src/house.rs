@@ -269,6 +269,7 @@ fn handle_obj_room(
     locate: i32,
     cont_row: &mut [Vec<ObjId>; MAX_BAG_ROWS],
 ) {
+    let locate = if (-(MAX_BAG_ROWS as i32)..=0).contains(&locate) { locate } else { 0 };
     let mut j = MAX_BAG_ROWS - 1;
     while j as i32 > -locate {
         for o in std::mem::take(&mut cont_row[j]) {
