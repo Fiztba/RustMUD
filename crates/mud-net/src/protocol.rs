@@ -712,11 +712,12 @@ fn perform_ttype(p: &mut ProtocolState, data: &[u8], output_empty: bool) {
     // stop-cycling flag inside that same branch, so an "ANSI" arriving as a
     // LATER response does not stop the cycle.
     let mut stop_cyclic = false;
-    // Both comparisons are MatchString in C, so they ignore case.
-    if p.var_str(Var::CLIENT_ID).eq_ignore_ascii_case(b"Unknown") {
+    // Both comparisons are exact strcmp in C (protocol.c:1895, 1914), not
+    // MatchString: a lowercase "ansi" is stored but does not stop the cycle.
+    if p.var_str(Var::CLIENT_ID) == b"Unknown" {
         p.vars[Var::CLIENT_ID as usize].value_string = Some(name.clone());
         // Cyclic TTYPE locks up Windows telnet (protocol.c:1717-1733).
-        if name.eq_ignore_ascii_case(b"ANSI") {
+        if name == b"ANSI" {
             stop_cyclic = true;
         }
     }
@@ -1145,22 +1146,25 @@ fn execute_msdp_pair(
                         items.push(def.name);
                     }
                 }
-                // C answers with its own literal name, so the reply is
-                // uppercase however the request was spelled.
-                send_msdp_list(p, &val_upper, &items, output_empty);
+                // C passes apValue here (protocol.c:2211), so the reply
+                // echoes the client's own spelling of the list name.
+                send_msdp_list(p, val, &items, output_empty);
             }
             b"REPORTED_VARIABLES" => {
                 let names: Vec<&[u8]> =
                     VAR_TABLE.iter().enumerate().filter(|(i, _)| p.vars[*i].report).map(|(_, d)| d.name).collect();
-                send_msdp_list(p, b"REPORTED_VARIABLES", &names, output_empty);
+                // apValue in C (protocol.c:2231): echoes the request spelling.
+                send_msdp_list(p, val, &names, output_empty);
             }
             b"CONFIGURABLE_VARIABLES" => {
                 let names: Vec<&[u8]> = VAR_TABLE.iter().filter(|d| d.configurable).map(|d| d.name).collect();
+                // The one list C names with a literal (protocol.c:2250).
                 send_msdp_list(p, b"CONFIGURABLE_VARIABLES", &names, output_empty);
             }
             b"GUI_VARIABLES" => {
                 let names: Vec<&[u8]> = VAR_TABLE.iter().filter(|d| d.gui).map(|d| d.name).collect();
-                send_msdp_list(p, b"GUI_VARIABLES", &names, output_empty);
+                // apValue in C (protocol.c:2271): echoes the request spelling.
+                send_msdp_list(p, val, &names, output_empty);
             }
             _ => {}
         },
@@ -1171,7 +1175,8 @@ fn execute_msdp_pair(
                 if !def.configurable {
                     return;
                 }
-                if def.write_once && !p.var_str(v).eq_ignore_ascii_case(b"Unknown") {
+                // Exact strcmp in C (protocol.c:2293-2294), not MatchString.
+                if def.write_once && p.var_str(v) != b"Unknown" {
                     return;
                 }
                 if def.is_string {
@@ -2224,15 +2229,16 @@ mod tests {
             assert_eq!(p.out, want, "{} {}", String::from_utf8_lossy(var), String::from_utf8_lossy(val));
         }
 
-        // A lowercase list name is answered with C's literal uppercase name.
+        // C passes apValue to MSDPSendList for this list (protocol.c:2211),
+        // so a lowercase request is answered with the same lowercase name.
         let mut p = ProtocolState::new();
         let _ = protocol_input(&mut p, &[IAC, DO, TELOPT_MSDP], true);
         p.out.clear();
         let _ = protocol_input(&mut p, &msdp_sb(b"list", b"reportable_variables"), true);
         let mut head = vec![IAC, SB, TELOPT_MSDP, MSDP_VAR];
-        head.extend_from_slice(b"REPORTABLE_VARIABLES");
+        head.extend_from_slice(b"reportable_variables");
         head.push(MSDP_VAL);
-        assert!(p.out.starts_with(&head), "list reply did not use the table-case name");
+        assert!(p.out.starts_with(&head), "list reply did not echo the request spelling");
 
         let _ = protocol_input(&mut p, &msdp_sb(b"REPORT", b"HEALTH"), true);
         assert!(p.vars[Var::HEALTH as usize].report);
@@ -2240,17 +2246,66 @@ mod tests {
         assert!(!p.vars[Var::HEALTH as usize].report, "lowercase RESET was ignored");
     }
 
-    /// The TTYPE "ANSI" stop-cycling check is MatchString in C too.
+    /// LIST REPORTED_VARIABLES also passes apValue (protocol.c:2231), so the
+    /// reply carries the request's spelling; only CONFIGURABLE_VARIABLES
+    /// answers with a literal name.
     #[test]
-    fn ttype_ansi_stops_the_cycle_regardless_of_case() {
-        for name in [b"ANSI" as &[u8], b"ansi"] {
+    fn msdp_list_reported_variables_echoes_request_spelling() {
+        let mut p = ProtocolState::new();
+        let _ = protocol_input(&mut p, &[IAC, DO, TELOPT_MSDP], true);
+        let _ = protocol_input(&mut p, &msdp_sb(b"REPORT", b"HEALTH"), true);
+        p.out.clear();
+        let _ = protocol_input(&mut p, &msdp_sb(b"list", b"reported_variables"), true);
+        let mut want = vec![IAC, SB, TELOPT_MSDP, MSDP_VAR];
+        want.extend_from_slice(b"reported_variables");
+        want.push(MSDP_VAL);
+        want.push(MSDP_ARRAY_OPEN);
+        want.push(MSDP_VAL);
+        want.extend_from_slice(b"HEALTH");
+        want.push(MSDP_ARRAY_CLOSE);
+        want.extend_from_slice(&[IAC, SE]);
+        assert_eq!(p.out, want);
+
+        p.out.clear();
+        let _ = protocol_input(&mut p, &msdp_sb(b"list", b"configurable_variables"), true);
+        let mut head = vec![IAC, SB, TELOPT_MSDP, MSDP_VAR];
+        head.extend_from_slice(b"CONFIGURABLE_VARIABLES");
+        head.push(MSDP_VAL);
+        assert!(p.out.starts_with(&head), "CONFIGURABLE_VARIABLES reply must use C's literal name");
+    }
+
+    /// The TTYPE "ANSI" stop-cycling check is an exact strcmp in C
+    /// (protocol.c:1914): uppercase "ANSI" stops the cycle, lowercase "ansi"
+    /// is stored as CLIENT_ID but the server still asks for the next TTYPE.
+    #[test]
+    fn ttype_ansi_stop_check_is_case_sensitive() {
+        let ttype_send = [IAC, SB, TELOPT_TTYPE, TELQUAL_SEND, IAC, SE];
+        for (name, stops) in [(b"ANSI" as &[u8], true), (b"ansi", false)] {
             let mut p = ProtocolState::new();
             let mut sb = vec![IAC, SB, TELOPT_TTYPE, TELQUAL_IS];
             sb.extend_from_slice(name);
             sb.extend_from_slice(&[IAC, SE]);
             p.out.clear();
             let _ = protocol_input(&mut p, &sb, true);
-            assert!(p.out.is_empty(), "{} did not stop the TTYPE cycle", String::from_utf8_lossy(name));
+            assert_eq!(p.var_str(Var::CLIENT_ID), name, "first TTYPE was not stored as CLIENT_ID");
+            if stops {
+                assert!(p.out.is_empty(), "ANSI did not stop the TTYPE cycle");
+            } else {
+                assert_eq!(p.out, ttype_send, "lowercase ansi must not stop the TTYPE cycle");
+            }
         }
+    }
+
+    /// The write-once guard on configurable variables is an exact strcmp
+    /// against "Unknown" (protocol.c:2293-2294): a client that sets CLIENT_ID
+    /// to "unknown" has used its one write, and a later value is rejected.
+    #[test]
+    fn msdp_write_once_guard_is_case_sensitive() {
+        let mut p = ProtocolState::new();
+        let _ = protocol_input(&mut p, &[IAC, DO, TELOPT_MSDP], true);
+        let _ = protocol_input(&mut p, &msdp_sb(b"CLIENT_ID", b"unknown"), true);
+        assert_eq!(p.var_str(Var::CLIENT_ID), b"unknown", "first write to CLIENT_ID was rejected");
+        let _ = protocol_input(&mut p, &msdp_sb(b"CLIENT_ID", b"Mudlet"), true);
+        assert_eq!(p.var_str(Var::CLIENT_ID), b"unknown", "\"unknown\" must count as a used write");
     }
 }
