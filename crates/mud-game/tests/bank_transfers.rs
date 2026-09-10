@@ -79,4 +79,22 @@ fn bank_transfers_are_atomic_at_balance_limits() {
         assert_eq!((p.gold, p.bank_gold), expected, "{command} {amount}");
         assert_eq!(p.gold as i64 + p.bank_gold as i64, gold as i64 + saved as i64);
     }
+    for deposit in [true, false] {
+        for source in [0, 1, 7, MAX_GOLD - 1, MAX_GOLD] {
+            for destination in [0, 1, 7, MAX_GOLD - 1, MAX_GOLD] {
+                for amount in [1, 2, 7, MAX_GOLD - 1, MAX_GOLD, i32::MAX] {
+                    let command = if deposit { b"deposit".as_slice() } else { b"withdraw" };
+                    let (gold, saved) = if deposit { (source, destination) } else { (destination, source) };
+                    g.ch_mut(ch).points.gold = gold;
+                    g.ch_mut(ch).points.bank_gold = saved;
+                    let cmd = g.commands.iter().position(|c| c.command == command).unwrap();
+                    assert!(mud_game::spec::special(g, ch, cmd, amount.to_string().as_bytes()));
+                    let p = g.ch(ch).points;
+                    let delta = if amount <= source && amount <= MAX_GOLD - destination { amount } else { 0 };
+                    let expected = if deposit { (gold - delta, saved + delta) } else { (gold + delta, saved - delta) };
+                    assert_eq!((p.gold, p.bank_gold), expected);
+                }
+            }
+        }
+    }
 }
