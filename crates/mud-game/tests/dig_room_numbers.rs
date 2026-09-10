@@ -53,7 +53,7 @@ fn dig_rejects_wrapping_room_numbers_without_changing_exits() {
     let builder = player(g, b"Builder", 12345); g.ch_mut(builder).level = LVL_IMPL;
     mud_game::handler::char_to_room(g, builder, 2); descriptor(g, builder, ConState::Playing);
     for z in &mut g.world.zones { z.zone_flags = [0; 4]; }
-    for value in ["65535", "131071", "-65537"] {
+    for value in ["65535", "131071", "-65537", "2147483648", "-2147483649", "-2", "+65535", "1e2"] {
         g.world.rooms[2].dir_option[NORTH] = Some(Box::new(mud_world::model::Exit {
             general_description: None, keyword: None, exit_info: 0, key: NOTHING, to_room_vnum: 1, to_room: 1,
         }));
@@ -66,4 +66,20 @@ fn dig_rejects_wrapping_room_numbers_without_changing_exits() {
         mud_game::olc::copy::do_dig(g, builder, format!("north {value}").as_bytes(), 0, 0);
         assert!(g.world.rooms[2].dir_option[NORTH].is_none(), "value={value}");
     }
+    mud_game::olc::copy::do_dig(g, builder, format!("north +{target}").as_bytes(), 0, 0);
+    assert_eq!(g.world.rooms[2].dir_option[NORTH].as_ref().unwrap().to_room, 1);
+    mud_game::olc::copy::do_dig(g, builder, b"north -1", 0, 0);
+    assert!(g.world.rooms[2].dir_option[NORTH].is_none());
+    mud_game::olc::copy::do_dig(g, builder, b"north 0", 0, 0);
+    assert!(g.world.rooms[2].dir_option[NORTH].is_none());
+    let z = &g.world.zones[g.world.rooms[2].zone as usize];
+    let missing = (z.bot..=z.top).find(|&v| v != 0 && g.world.real_room(v).is_none()).unwrap();
+    let source = g.world.rooms[2].vnum; let count = g.world.rooms.len();
+    g.character_list.push_front(builder);
+    mud_game::olc::copy::do_dig(g, builder, format!("north {missing} Review room").as_bytes(), 0, 0);
+    let new = g.world.real_room(missing).unwrap(); let source = g.world.real_room(source).unwrap();
+    assert_eq!(g.world.rooms.len(), count + 1);
+    assert_eq!(g.world.rooms[source as usize].dir_option[NORTH].as_ref().unwrap().to_room, new);
+    assert_eq!(g.world.rooms[new as usize].name.as_deref(), Some(b"Review room".as_slice()));
 }
+
