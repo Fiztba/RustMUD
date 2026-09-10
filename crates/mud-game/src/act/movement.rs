@@ -513,22 +513,41 @@ fn has_key(g: &Game, chid: CharId, key: Idx) -> bool {
     false
 }
 
-fn do_doorcmd(g: &mut Game, chid: CharId, target: DoorTarget, scmd: i32) {
+fn do_doorcmd(g: &mut Game, chid: CharId, target: DoorTarget, scmd: i32) -> bool {
+    let room = g.ch(chid).in_room;
+    let object_state = |g: &Game| match target {
+        DoorTarget::Obj { oid } => g.try_obj(oid).map(|o| (o.in_room, o.carried_by, o.type_flag, o.values)),
+        _ => None,
+    };
+    let exit_state = |g: &Game| match target {
+        DoorTarget::Exit { dir } => g.world.rooms.get(room as usize)
+            .and_then(|r| r.dir_option[dir].as_deref())
+            .map(|e| (e.to_room, e.exit_info, e.key, e.keyword.clone())),
+        _ => None,
+    };
+    let original_object = object_state(g);
+    let original_exit = exit_state(g);
+    let actor_valid = |g: &Game| g.try_ch(chid).is_some_and(|ch|
+        ch.in_room == room && !ch.act.is_set(if ch.is_npc() { flags::MOB_NOTDEADYET } else { flags::PLR_NOTDEADYET }));
+    let unchanged = |g: &Game| actor_valid(g)
+        && object_state(g) == original_object && exit_state(g) == original_exit;
+
     // Door triggers fire before the state change, for object doors too
     // (direction -1 renders as "none").
     let trig_dir = match target {
         DoorTarget::Exit { dir } => dir as i32,
         _ => -1,
     };
-    if crate::dg::triggers::door_mtrigger(g, chid, scmd, trig_dir) == 0 {
-        return;
+    if crate::dg::triggers::door_mtrigger(g, chid, scmd, trig_dir) == 0 || !unchanged(g) {
+        return false;
     }
-    if crate::dg::triggers::door_wtrigger(g, chid, scmd, trig_dir) == 0 {
-        return;
+    if crate::dg::triggers::door_wtrigger(g, chid, scmd, trig_dir) == 0 || !unchanged(g) {
+        return false;
     }
     let DoorTarget::Exit { dir } = target else {
         do_doorcmd_obj(g, chid, target, scmd);
-        return;
+        return actor_valid(g) && object_state(g).zip(original_object)
+            .is_some_and(|(now, before)| (now.0, now.1, now.2) == (before.0, before.1, before.2));
     };
     let room = g.ch(chid).in_room;
     let keyword = door_keyword(g, room, dir);
@@ -599,6 +618,8 @@ fn do_doorcmd(g: &mut Game, chid: CharId, target: DoorTarget, scmd: i32) {
         note.extend_from_slice(b" from the other side.\r\n");
         comm::send_to_room(g, back_room, &note);
     }
+    actor_valid(g) && exit_state(g).zip(original_exit)
+        .is_some_and(|(now, before)| (now.0, now.2, now.3) == (before.0, before.2, before.3))
 }
 
 /// The container half of do_doorcmd: flips CONT_ bits in values[1]; the room
@@ -761,8 +782,14 @@ pub fn do_gen_door(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, sub
         send_to_char(g, chid, b"Oh.. it wasn't locked, after all..\r\n");
     } else if locked && flags_needed & NEED_UNLOCKED != 0 && autokey && has_key(g, chid, keynum) {
         send_to_char(g, chid, b"It is locked, but you have the key.\r\n");
-        do_doorcmd(g, chid, target, SCMD_UNLOCK);
-        do_doorcmd(g, chid, target, subcmd);
+        if do_doorcmd(g, chid, target, SCMD_UNLOCK) {
+            // A feedback trigger may have locked it again; do not retry forever.
+            let still_locked = match target {
+                DoorTarget::Obj { oid } => g.obj(oid).values[1] & flags::CONT_LOCKED != 0,
+                DoorTarget::Exit { dir } => exit_info(g, g.ch(chid).in_room, dir) & flags::EX_LOCKED != 0,
+            };
+            if !still_locked { do_doorcmd(g, chid, target, subcmd); }
+        }
     } else if locked && flags_needed & NEED_UNLOCKED != 0 && autokey {
         send_to_char(g, chid, b"It is locked, and you do not have the key!\r\n");
     } else if locked && flags_needed & NEED_UNLOCKED != 0 && locked_msg_applies {
