@@ -711,10 +711,9 @@ pub fn game_pulse(g: &mut Game) {
         let Some(d) = g.descriptors.get(di) else { continue };
         if !d.has_prompt && !dead.contains(&di) {
             let prompt = make_prompt(g, di);
-            let Some(d) = g.descriptors.get_mut(di) else { continue };
-            if d.write_direct(&prompt).is_err() {
+            if g.descriptors.process_output(di, true, false, &prompt).is_err() {
                 dead.push(di);
-            } else {
+            } else if let Some(d) = g.descriptors.get_mut(di) {
                 d.has_prompt = true;
             }
         }

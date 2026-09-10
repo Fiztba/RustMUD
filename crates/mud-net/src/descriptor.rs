@@ -80,6 +80,8 @@ pub struct Descriptor {
 
     /// Buffered output (post-translation bytes). Cap LARGE_BUFSIZE-1.
     pub output: Vec<u8>,
+    /// Prefix already assembled for the wire; resume it without adding another prompt.
+    pending_output: usize,
     /// Overflow state: writes are dropped and the flush appends **OVERFLOW**.
     pub overflowed: bool,
     /// Bytes still free in the *current* buffer, small or large. This is
@@ -139,6 +141,7 @@ impl Descriptor {
             history: Default::default(),
             history_pos: 0,
             output: Vec::new(),
+            pending_output: 0,
             overflowed: false,
             bufspace: SMALL_BUFSIZE - 1,
             large_outbuf: false,
@@ -197,7 +200,7 @@ impl Descriptor {
         let mut bytes = bytes;
         // Too big even for a large buffer: truncate into the overflow state.
         if size + self.output.len() + 1 > LARGE_BUFSIZE {
-            size = (LARGE_BUFSIZE - self.output.len()).saturating_sub(1);
+            size = LARGE_BUFSIZE.saturating_sub(self.output.len()).saturating_sub(1);
             bytes = &bytes[..size];
             stats.overflows += 1;
         }
@@ -230,6 +233,15 @@ impl Descriptor {
             stats.pool_free += 1;
         }
         self.bufspace = (SMALL_BUFSIZE - 1).saturating_sub(self.output.len());
+    }
+
+    fn refresh_output_space(&mut self, stats: &mut BufStats) {
+        if self.output.is_empty() {
+            self.reset_buffer(stats);
+        } else {
+            let capacity = if self.large_outbuf { LARGE_BUFSIZE } else { SMALL_BUFSIZE };
+            self.bufspace = capacity.saturating_sub(1 + self.output.len());
+        }
     }
 
     /// Drain protocol-layer negotiation bytes into the output buffer,
@@ -290,6 +302,27 @@ impl Descriptor {
         prompt: &[u8],
         stats: &mut BufStats,
     ) -> Result<(), ()> {
+        self.process_output_using(compact, playing_pc, prompt, stats, |d, bytes| d.write_direct(bytes))
+    }
+
+    fn process_output_using(
+        &mut self,
+        compact: bool,
+        playing_pc: bool,
+        prompt: &[u8],
+        stats: &mut BufStats,
+        mut write: impl FnMut(&mut Self, &[u8]) -> Result<usize, ()>,
+    ) -> Result<(), ()> {
+        if self.pending_output != 0 {
+            let pending = self.output[..self.pending_output].to_vec();
+            let written = write(self, &pending)?;
+            self.output.drain(..written);
+            self.pending_output -= written;
+            self.refresh_output_space(stats);
+            if self.pending_output != 0 || self.output.is_empty() {
+                return Ok(());
+            }
+        }
         let oob = self.protocol.write_oob != 0;
         let mut payload: Vec<u8> = Vec::with_capacity(self.output.len() + prompt.len() + 32);
         payload.extend_from_slice(b"\r\n");
@@ -311,32 +344,18 @@ impl Descriptor {
             2
         };
 
-        let written = self.write_direct(&payload[send_from..])?;
-        // Snoop copy: "% " + the buffer + "%%". The text is padded to
-        // `result` columns with %*s, but `result` never exceeds the buffer
-        // length in practice, so the padding never fires.
-        if written > 0 {
+        let written = write(self, &payload[send_from..])?;
+        // Snoop the content once; resumed bytes must not duplicate the snoop.
+        if !self.output.is_empty() {
             let mut copy = b"% ".to_vec();
             copy.extend_from_slice(&self.output);
             copy.extend_from_slice(b"%%");
             self.snoop_output = Some(copy);
         }
-        let content_len = self.output.len();
-        // Bytes of `output` content actually sent (leading \r\n excluded).
-        let content_sent = written.saturating_sub(if send_from == 0 { 2 } else { 0 }).min(content_len);
-        if content_sent >= content_len {
-            // Full content flush; any unsent prompt/overflow tail is re-saved
-            // as fresh content.
-            let sent_total = send_from + written;
-            let tail = if sent_total < payload.len() { payload[sent_total..].to_vec() } else { Vec::new() };
-            self.output = tail;
-            self.overflowed = false;
-            self.reset_buffer(stats);
-        } else {
-            // Partial content write: shift the remainder down.
-            self.output.drain(..content_sent);
-            self.bufspace += content_sent;
-        }
+        self.output = payload[send_from + written..].to_vec();
+        self.pending_output = self.output.len();
+        self.overflowed = false;
+        self.refresh_output_space(stats);
         Ok(())
     }
 
@@ -1139,6 +1158,84 @@ mod tests {
         let mut d = desc();
         d.feed_input_test(b"ab$\x08c\r\n").unwrap();
         assert_eq!(d.input.pop_front().unwrap().0, b"abc");
+    }
+
+    #[test]
+    fn partial_output_preserves_every_byte_of_the_assembled_payload() {
+        let expected = b"\r\nHello\r\n> ";
+        for split in 0..expected.len() {
+            let mut d = desc(); let mut stats = BufStats::default();
+            d.output = b"Hello".to_vec(); d.has_prompt = true;
+            let mut sent = vec![];
+            d.process_output_using(false, true, b"> ", &mut stats, |_, bytes| {
+                let count = split.min(bytes.len()); sent.extend_from_slice(&bytes[..count]); Ok(count)
+            }).unwrap();
+            // The game loop records that this flush includes its prompt.
+            d.has_prompt = true;
+            d.process_output_using(false, true, b"> ", &mut stats, |_, bytes| {
+                sent.extend_from_slice(bytes); Ok(bytes.len())
+            }).unwrap();
+            assert_eq!(sent, expected, "split {split}");
+            assert!(d.output.is_empty());
+        }
+    }
+
+    #[test]
+    fn new_output_waits_after_the_pending_payload_and_gets_one_prompt() {
+        let mut d = desc(); let mut stats = BufStats::default(); let mut sent = vec![];
+        d.has_prompt = true;
+        let first = vec![b'x'; SMALL_BUFSIZE * 2];
+        d.append_output(&first, &mut stats);
+        d.process_output_using(false, true, b"> ", &mut stats, |_, _| Ok(0)).unwrap();
+        assert!(d.large_outbuf);
+        d.append_output(b"Next", &mut stats);
+        d.has_prompt = true;
+        d.process_output_using(false, true, b"> ", &mut stats, |_, bytes| {
+            let count = 1.min(bytes.len()); sent.extend_from_slice(&bytes[..count]); Ok(count)
+        }).unwrap();
+        d.process_output_using(false, true, b"> ", &mut stats, |_, bytes| {
+            sent.extend_from_slice(bytes); Ok(bytes.len())
+        }).unwrap();
+        let mut expected = b"\r\n".to_vec(); expected.extend_from_slice(&first);
+        expected.extend_from_slice(b"\r\n> \r\nNext\r\n> ");
+        assert_eq!(sent, expected);
+        assert!(d.output.is_empty());
+        assert!(!d.large_outbuf);
+    }
+
+    #[test]
+    fn partial_oob_and_overflow_payloads_resume_without_extra_formatting() {
+        for oob in [false, true] {
+            let mut d = desc(); let mut stats = BufStats::default(); let mut sent = vec![];
+            d.output = b"Hello".to_vec(); d.overflowed = true; d.has_prompt = true;
+            d.protocol.write_oob = if oob { 1 } else { 0 };
+            d.process_output_using(true, true, b"> ", &mut stats, |_, bytes| {
+                sent.extend_from_slice(&bytes[..3]); Ok(3)
+            }).unwrap();
+            d.protocol.write_oob = 0;
+            d.process_output_using(false, true, b"DIFFERENT", &mut stats, |_, bytes| {
+                sent.extend_from_slice(bytes); Ok(bytes.len())
+            }).unwrap();
+            let expected = if oob { b"Hello**OVERFLOW**\r\n".as_slice() }
+                else { b"\r\nHello**OVERFLOW**\r\n> ".as_slice() };
+            assert_eq!(sent, expected);
+            assert!(d.output.is_empty());
+        }
+    }
+
+    #[test]
+    fn standalone_prompt_resumes_after_would_block() {
+        let mut d = desc(); let mut stats = BufStats::default(); let mut sent = vec![];
+        d.has_prompt = false;
+        d.process_output_using(true, false, b"> ", &mut stats, |_, _| Ok(0)).unwrap();
+        assert_eq!(d.output, b"> ");
+        d.has_prompt = true;
+        d.process_output_using(false, true, b"> ", &mut stats, |_, bytes| {
+            sent.extend_from_slice(bytes); Ok(bytes.len())
+        }).unwrap();
+        assert_eq!(sent, b"> ");
+        assert!(d.snoop_output.is_none());
+        assert!(d.output.is_empty());
     }
 
     #[test]
