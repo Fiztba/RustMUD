@@ -101,7 +101,7 @@ pub fn do_attach(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subc
             send_to_char(g, chid, b"You can only attach triggers in your own zone.\r\n");
             return;
         }
-        let rn = g.world.trig_map.get(&(tn as Idx)).copied();
+        let rn = g.real_trigger(tn);
         let trig = rn.and_then(|r| read_trigger(g, r));
         let Some(trig) = trig else {
             send_to_char(g, chid, b"That trigger does not exist.\r\n");
@@ -152,7 +152,7 @@ pub fn do_attach(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subc
             send_to_char(g, chid, b"You can only attach triggers in your own zone.\r\n");
             return;
         }
-        let rn = g.world.trig_map.get(&(tn as Idx)).copied();
+        let rn = g.real_trigger(tn);
         let trig = rn.and_then(|r| read_trigger(g, r));
         let Some(trig) = trig else {
             send_to_char(g, chid, b"That trigger does not exist.\r\n");
@@ -191,7 +191,7 @@ pub fn do_attach(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subc
             send_to_char(g, chid, b"You can only attach triggers in your own zone.\r\n");
             return;
         }
-        let rn = g.world.trig_map.get(&(tn as Idx)).copied();
+        let rn = g.real_trigger(tn);
         let trig = rn.and_then(|r| read_trigger(g, r));
         let Some(trig) = trig else {
             send_to_char(g, chid, b"That trigger does not exist.\r\n");
@@ -226,10 +226,8 @@ pub fn do_detach(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subc
     // The instance is read up front purely for its name; a bad vnum leaves
     // it unset and the later %s prints "(null)".
     let trig_name: BStr = g
-        .world
-        .trig_map
-        .get(&(tn as Idx))
-        .and_then(|&rn| g.world.triggers.get(rn as usize))
+        .real_trigger(tn)
+        .and_then(|rn| g.world.triggers.get(rn as usize))
         .and_then(|t| t.name.clone())
         .unwrap_or_else(|| b"(null)".to_vec());
 
@@ -492,7 +490,7 @@ pub fn do_tstat(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcm
         return;
     }
     let vnum = atoi32(&str_);
-    let Some(&rnum) = g.world.trig_map.get(&(vnum as Idx)) else {
+    let Some(rnum) = g.real_trigger(vnum) else {
         send_to_char(g, chid, b"That vnum does not exist.\r\n");
         return;
     };

@@ -366,7 +366,7 @@ fn do_dgoload(g: &mut Game, oid: ObjId, argument: &[u8], _subcmd: i32) {
             obj_log(g, oid, &msg);
             return;
         };
-        let mob = g.world.real_mobile(number as Idx).and_then(|r| crate::db::read_mobile(g, r));
+        let mob = g.real_mobile(number).and_then(|r| crate::db::read_mobile(g, r));
         let Some(mob) = mob else {
             obj_log(g, oid, "oload: bad mob vnum");
             return;
@@ -378,7 +378,7 @@ fn do_dgoload(g: &mut Game, oid: ObjId, argument: &[u8], _subcmd: i32) {
         }
         load_mtrigger(g, mob);
     } else if crate::handler::is_abbrev(&arg1, b"obj") {
-        let object = g.world.real_object(number as Idx).and_then(|r| crate::db::read_object(g, r));
+        let object = g.real_object(number).and_then(|r| crate::db::read_object(g, r));
         let Some(object) = object else {
             obj_log(g, oid, "oload: bad object vnum");
             return;
