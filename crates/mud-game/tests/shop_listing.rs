@@ -80,4 +80,29 @@ fn filtered_stock_includes_last_item_and_quotes_quest_cost() {
         assert!(out.contains("A gleaming gem"), "{out}");
         assert!(out.contains("123 qp"), "quest listing must quote purchase cost: {out}");
     }
+    let mut obj = mud_game::obj::create_obj();
+    obj.cost = 17;
+    obj.name = Some(b"apple".to_vec());
+    obj.short_description = Some(b"an apple".to_vec());
+    let apple = g.objs.insert(obj.clone());
+    let second_apple = g.objs.insert(obj);
+    for item in [apple, second_apple] { mud_game::handler::obj_to_char(g, item, keeper); }
+    for filter in [b"gem".as_slice(), b"apple", b"", b"missing"] {
+        g.descriptors.get_mut(di).unwrap().output.clear();
+        assert!(mud_game::shop::shop_keeper(g, buyer, keeper, command, filter));
+        let out = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
+        assert_eq!(out.contains("A gleaming gem"), filter == b"gem" || filter.is_empty(), "{out}");
+        assert_eq!(out.matches("An apple").count(), usize::from(filter == b"apple" || filter.is_empty()), "{out}");
+        if filter == b"apple" || filter.is_empty() {
+            assert!(out.contains("34\r\n"), "ordinary prices retain their profit modifier: {out}");
+            let row = out.lines().find(|line| line.contains("An apple")).unwrap();
+            assert!(row.split_whitespace().any(|word| word == "2"), "duplicate stock quantity: {out}");
+        }
+        if filter == b"missing" { assert!(out.contains("none of those are for sale"), "{out}"); }
+    }
+    for item in [gem, apple, second_apple] { mud_game::handler::extract_obj(g, item); }
+    g.descriptors.get_mut(di).unwrap().output.clear();
+    assert!(mud_game::shop::shop_keeper(g, buyer, keeper, command, b""));
+    let out = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
+    assert!(out.contains("nothing for sale"), "{out}");
 }
