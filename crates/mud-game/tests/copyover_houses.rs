@@ -42,16 +42,29 @@ fn copyover_persists_house_additions_and_removals() {
     let ch = g.chars.insert(mud_game::ch::Char { name: Some(b"Tester".to_vec()), ..Default::default() });
     let oid = mud_game::db::read_object(g, 0).unwrap();
     g.obj_mut(oid).name = Some(b"copyover-test-object".to_vec());
-    obj_to_room(g, oid, room as u16);
+    g.obj_mut(oid).type_flag = flags::ITEM_CONTAINER;
+    g.obj_mut(oid).weight = 7;
+    g.obj_mut(oid).values[3] = 0;
+    let child = mud_game::db::read_object(g, 0).unwrap();
+    g.obj_mut(child).weight = 3;
+    mud_game::handler::obj_to_obj(g, child, oid);
     let path = g.lib_dir.join("house").join(format!("{vnum}.house"));
     mud_game::copyover::do_copyover(g, ch, b"", 0, 0);
     assert!(g.copyover.is_some());
+    // A later command in the same pulse can still change the house.
+    obj_to_room(g, oid, room as u16);
+    assert!(mud_game::copyover::take_copyover_plan(g).is_some());
     let data = std::fs::read(&path).expect("copyover must save dirty houses");
     let records = mud_game::objsave::objsave_parse_objects(g, &mut mud_world::lex::Reader::new(&data));
-    assert_eq!(records.len(), 1);
-    assert_eq!(g.obj(records[0].obj).name.as_deref(), Some(b"copyover-test-object".as_slice()));
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].locate, -1);
+    assert_eq!(g.obj(records[0].obj).weight, 3);
+    assert_eq!(g.obj(records[1].obj).name.as_deref(), Some(b"copyover-test-object".as_slice()));
+    assert_eq!(g.obj(records[1].obj).weight, 7);
+    assert_eq!(g.obj(oid).weight, 10, "saving must restore live container weight");
     assert!(!room_flagged(g, room as u16, flags::ROOM_HOUSE_CRASH));
-    obj_from_room(g, oid);
     mud_game::copyover::do_copyover(g, ch, b"", 0, 0);
+    obj_from_room(g, oid);
+    assert!(mud_game::copyover::take_copyover_plan(g).is_some());
     assert_eq!(std::fs::read(path).unwrap(), b"$~\n", "removed items must not reappear after recovery");
 }
