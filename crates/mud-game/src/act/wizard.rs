@@ -1042,7 +1042,7 @@ pub fn do_dc(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd: 
         send_to_char(g, chid, b"No such connection.\r\n");
         return;
     };
-    let victim = g.descriptors.get(di).and_then(|d| d.character);
+    let victim = g.descriptors.get(di).and_then(|d| d.original.or(d.character));
     if let Some(v) = victim {
         if g.try_ch(v).is_some() && g.ch(v).level >= g.ch(chid).level {
             if !crate::handler::can_see(g, chid, v) {
@@ -1058,7 +1058,7 @@ pub fn do_dc(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd: 
         act(g, b"$E's already being disconnected.", false, Some(chid), None, victim, comm::TO_CHAR);
         return;
     }
-    let new_state = if state == ConState::Playing { ConState::Disconnect } else { ConState::Close };
+    let new_state = if g.descriptors.get(di).is_some_and(|d| d.is_playing()) { ConState::Disconnect } else { ConState::Close };
     if let Some(d) = g.descriptors.get_mut(di) {
         d.state = new_state;
     }
