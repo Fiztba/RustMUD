@@ -42,5 +42,17 @@ fn scripts_can_read_all_ten_exit_directions() {
         }));
         let result = dg::variables::var_subst(g, ctx, format!("%self.{name}(vnum)%").as_bytes());
         assert_eq!(result, g.world.rooms[2].vnum.to_string().as_bytes(), "direction={name}");
+        assert_eq!(dg::variables::var_subst(g, ctx, format!("%self.{}(key)%", name.to_uppercase()).as_bytes()), (100 + dir).to_string().as_bytes());
+        let uid = format!("{}{}", dg::UID_CHAR as char, dg::room_script_id(g, 2));
+        assert_eq!(dg::variables::var_subst(g, ctx, format!("%self.{name}(room)%").as_bytes()), uid.as_bytes());
+        g.world.rooms[1].dir_option[dir].as_mut().unwrap().exit_info = 3;
+        let bits = dg::variables::var_subst(g, ctx, format!("%self.{name}(bits)%").as_bytes());
+        assert!(!bits.is_empty());
+        assert_eq!(bits, dg::variables::var_subst(g, ctx, format!("%self.{name}%").as_bytes()));
+        g.world.rooms[1].dir_option[dir].as_mut().unwrap().to_room = mud_data::types::NOWHERE;
+        assert_eq!(dg::variables::var_subst(g, ctx, format!("%self.{name}(vnum)%").as_bytes()), b"-1");
+        assert!(dg::variables::var_subst(g, ctx, format!("%self.{name}(room)%").as_bytes()).is_empty());
+        g.world.rooms[1].dir_option[dir] = None;
+        assert!(dg::variables::var_subst(g, ctx, format!("%self.{name}(vnum)%").as_bytes()).is_empty());
     }
 }
