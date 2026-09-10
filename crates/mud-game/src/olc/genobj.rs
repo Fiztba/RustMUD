@@ -205,7 +205,7 @@ pub fn delete_object(g: &mut Game, rnum: Idx) -> Option<Idx> {
     // Adjust rnums of all other objects.
     for id in g.object_list.clone() {
         if let Some(o) = g.objs.get_mut(id) {
-            if o.item_number > rnum {
+            if o.item_number != NOTHING && o.item_number > rnum {
                 o.item_number -= 1;
             }
         }

@@ -311,9 +311,7 @@ fn postmaster_check_mail(g: &mut Game, chid: CharId, mailman: CharId) {
 }
 
 /// postmaster_receive_mail. Every waiting letter becomes a
-/// fresh ITEM_NOTE. The object carries `item_number = 1` rather than
-/// NOTHING, so the note is saved and reloaded as prototype rnum 1 with
-/// every string overridden. Deliberate.
+/// fresh, prototype-independent ITEM_NOTE.
 fn postmaster_receive_mail(g: &mut Game, chid: CharId, mailman: CharId) {
     let id = g.ch(chid).idnum;
     if !has_mail(g, id) {
@@ -334,7 +332,6 @@ fn postmaster_receive_mail(g: &mut Game, chid: CharId, mailman: CharId) {
             break;
         };
         let mut obj = crate::obj::create_obj();
-        obj.item_number = 1;
         obj.name = Some(b"mail paper letter".to_vec());
         obj.short_description = Some(b"a piece of mail".to_vec());
         obj.description = Some(b"Someone has left a piece of mail here.".to_vec());
