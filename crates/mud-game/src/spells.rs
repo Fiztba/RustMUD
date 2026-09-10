@@ -203,15 +203,9 @@ fn isname_obj(search: &[u8], list: &[u8]) -> bool {
     let searchname = search.to_ascii_lowercase();
     let namelist = list.to_ascii_lowercase();
 
-    let found_pos = namelist
-        .windows(searchname.len())
-        .position(|w| w == searchname.as_slice());
-    let Some(found_pos) = found_pos else { return false };
-
-    if namelist.starts_with(searchname.as_slice()) {
-        return true;
-    }
-    found_pos > 0 && namelist[found_pos - 1] == b' '
+    namelist.windows(searchname.len()).enumerate().any(|(pos, word)| {
+        word == searchname.as_slice() && (pos == 0 || namelist[pos - 1] == b' ')
+    })
 }
 
 #[cfg(test)]
@@ -219,7 +213,7 @@ mod tests {
     use super::isname_obj;
 
     #[test]
-    fn isname_obj_first_strstr_hit_decides() {
+    fn isname_obj_checks_later_word_starts() {
         // Whole word at the start.
         assert!(isname_obj(b"ring", b"ring gold"));
         // Whole word after a space.
@@ -228,9 +222,8 @@ mod tests {
         assert!(isname_obj(b"RING", b"gold ring"));
         // Embedded substring only → no.
         assert!(!isname_obj(b"ring", b"shimmering"));
-        // The quirk: strstr's FIRST hit is inside "shimmering", not the
-        // stand-alone word later — the earlier embedded hit shadows it.
-        assert!(!isname_obj(b"ring", b"shimmering ring"));
+        // An embedded occurrence must not hide a later matching alias.
+        assert!(isname_obj(b"ring", b"shimmering ring"));
         assert!(!isname_obj(b"ring", b"boring"));
     }
 }
