@@ -588,7 +588,7 @@ fn innate_affects(g: &Game, chid: CharId) -> FlagSet {
 }
 
 /// affect_modify_ar.
-fn affect_modify_ar(g: &mut Game, chid: CharId, loc: i32, mod_: i32, bitv: FlagSet, add: bool) {
+pub(crate) fn affect_modify_ar(g: &mut Game, chid: CharId, loc: i32, mod_: i32, bitv: FlagSet, add: bool) {
     // Widen before negating: i32::MIN is a valid stored object modifier.
     // Fixed-width stats use explicit wrapping arithmetic so apply/remove stay
     // reversible at their representation limits in debug and release builds.
@@ -1079,51 +1079,26 @@ pub fn get_char_world_vis(g: &Game, chid: CharId, name: &[u8], number: Option<i3
         Some(n) => (n, name.to_vec()),
         None => get_number(name),
     };
-    if let Some(found) = get_char_room_vis(g, chid, &name, Some(num)) {
-        return Some(found);
-    }
-    if num == 0 {
-        return None;
+    if num == 0 { return get_player_vis(g, chid, &name, false); }
+    get_char_world_vis_counted(g, chid, &name, &mut num, false)
+}
+
+fn get_char_world_vis_counted(g: &Game, chid: CharId, name: &[u8], number: &mut i32, room_searched: bool) -> Option<CharId> {
+    if !room_searched {
+        if let Some(found) = get_char_room_vis_counted(g, chid, name, number) { return Some(found); }
     }
     let room = g.ch(chid).in_room;
-    if num == FIND_INDEX_LAST {
-        // No countdown to thread: the room scan above already answered if it
-        // had a match at all, so take the last one outside it.
-        let mut last = None;
-        for &other in &g.character_list {
-            let Some(oc) = g.try_ch(other) else { continue };
-            if oc.in_room == room {
-                continue;
-            }
-            if isname(&name, oc.name.as_deref().unwrap_or(b"")) && can_see(g, chid, other) {
-                last = Some(other);
-            }
-        }
-        return last;
-    }
-    // Count room matches against the remaining number: the same counter
-    // threads through both scans.
-    if room != NOWHERE {
-        for &other in &g.rooms[room as usize].people {
-            let oc = g.ch(other);
-            if isname(&name, oc.name.as_deref().unwrap_or(b"")) && can_see(g, chid, other) {
-                num -= 1;
-            }
-        }
-    }
+    let mut last = None;
     for &other in &g.character_list {
         let Some(oc) = g.try_ch(other) else { continue };
-        if oc.in_room == room {
-            continue; // already counted
-        }
-        if isname(&name, oc.name.as_deref().unwrap_or(b"")) && can_see(g, chid, other) {
-            num -= 1;
-            if num <= 0 {
-                return Some(other);
-            }
+        if room != NOWHERE && oc.in_room == room { continue; }
+        if isname(name, oc.name.as_deref().unwrap_or(b"")) && can_see(g, chid, other) {
+            if *number == FIND_INDEX_LAST { last = Some(other); continue; }
+            *number -= 1;
+            if *number == 0 { return Some(other); }
         }
     }
-    None
+    last
 }
 
 /// get_obj_in_list_vis.
@@ -1164,8 +1139,7 @@ pub fn get_obj_in_list_vis_counted(
 }
 
 /// get_obj_vis: carried → room → whole object_list, threading
-/// the countdown. The final world scan revisits carried and room items
-/// rather than skipping them, so an item can be counted twice.
+/// the countdown and skipping items already searched locally.
 pub fn get_obj_vis_counted(g: &Game, chid: CharId, name: &[u8], number: &mut i32) -> Option<ObjId> {
     let carrying = &g.ch(chid).carrying;
     if let Some(oid) = get_obj_in_list_vis_counted(g, chid, name, number, carrying) {
@@ -1183,9 +1157,8 @@ pub fn get_obj_vis_counted(g: &Game, chid: CharId, name: &[u8], number: &mut i32
         if *number == 0 {
             break;
         }
-        if g.try_obj(oid).is_none() {
-            continue;
-        }
+        let Some(o) = g.try_obj(oid) else { continue };
+        if o.carried_by == Some(chid) || (room != NOWHERE && o.in_room == room) { continue; }
         if isname(name, obj_name(g, oid)) && can_see_obj(g, chid, oid) {
             if *number == FIND_INDEX_LAST {
                 last = Some(oid);
@@ -1277,7 +1250,7 @@ pub fn generic_find(
         }
     }
     if bitvector & FIND_CHAR_WORLD != 0 {
-        if let Some(ch) = get_char_world_vis(g, chid, &name, Some(number)) {
+        if let Some(ch) = get_char_world_vis_counted(g, chid, &name, &mut number, bitvector & FIND_CHAR_ROOM != 0) {
             return (FIND_CHAR_WORLD, Some(ch), None);
         }
     }
@@ -1303,7 +1276,14 @@ pub fn generic_find(
     }
     if bitvector & FIND_OBJ_WORLD != 0 {
         let mut last = None;
+        let room = g.ch(chid).in_room;
         for &oid in &g.object_list {
+            let Some(o) = g.try_obj(oid) else { continue };
+            if (bitvector & FIND_OBJ_INV != 0 && o.carried_by == Some(chid))
+                || (bitvector & FIND_OBJ_ROOM != 0 && room != NOWHERE && o.in_room == room)
+                || (bitvector & FIND_OBJ_EQUIP != 0 && o.worn_by == Some(chid)) {
+                continue;
+            }
             if isname(&name, obj_name(g, oid)) && can_see_obj(g, chid, oid) {
                 if number == FIND_INDEX_LAST {
                     last = Some(oid);

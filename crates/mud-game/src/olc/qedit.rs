@@ -741,7 +741,7 @@ pub fn qedit_parse(
             olc.quest.as_mut().unwrap().qm_vnum = idx_store(number);
         }
         QEDIT_TYPES => {
-            let number = number - 1;
+            let number = number.saturating_sub(1);
             if !(0..NUM_AQ_TYPES).contains(&number) {
                 write_to_desc(g, di, b"Invalid choice!\r\n");
                 qedit_disp_type_menu(g, di, &mut olc);

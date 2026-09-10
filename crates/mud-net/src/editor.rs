@@ -176,7 +176,7 @@ fn append_within(dst: &mut Vec<u8>, src: &[u8], size: usize) {
 
 /// Read a leading integer: optional whitespace, optional sign, then digits.
 /// Stops at the first non-digit and never reports an error. Overflow
-/// saturates at 64-bit range and is then truncated to 32 bits.
+/// saturates at the 32-bit return type limits.
 pub(crate) fn parse_int_prefix(s: &[u8]) -> i32 {
     let mut p = 0;
     while p < s.len() && is_ws(s[p]) {
@@ -198,7 +198,7 @@ pub(crate) fn parse_int_prefix(s: &[u8]) -> i32 {
     if neg {
         val = -val;
     }
-    val.clamp(i64::MIN as i128, i64::MAX as i128) as i64 as i32
+    val.clamp(i32::MIN as i128, i32::MAX as i128) as i32
 }
 
 /// Read one decimal integer at `*p`: leading whitespace, optional sign, and
@@ -232,7 +232,7 @@ fn scan_int(s: &[u8], p: &mut usize) -> Option<i32> {
         val = -val;
     }
     *p = q;
-    Some(val.clamp(i64::MIN as i128, i64::MAX as i128) as i64 as i32)
+    Some(val.clamp(i32::MIN as i128, i32::MAX as i128) as i32)
 }
 
 /// Parse `" <low> - <high> "`. Returns (count, low, high), where count is
@@ -996,7 +996,7 @@ fn parse_edit_action(
                 return;
             }
             let line_low = parse_int_prefix(&arg1);
-            append_within(&mut insert_text, b"\r\n", MAX_STRING_LENGTH - 1);
+            insert_text.extend_from_slice(b"\r\n");
 
             let mut i: i32 = 1;
             let max_str = eb.max_str;
@@ -1019,11 +1019,7 @@ fn parse_edit_action(
                     msgs.push(b"Line number out of range; insert aborted.\r\n".to_vec());
                     return;
                 };
-                // strlen(*d->str) [prefix, *s nulled] + strlen(buf2) +
-                // strlen(s + 1) + 3 > d->max_str. strlen(s+1) reads past the
-                // terminator when s is at the end (UB); stand-in: 0.
-                let suffix_after_first = buf.len().saturating_sub(pos).saturating_sub(1);
-                if pos + insert_text.len() + suffix_after_first + 3 > max_str {
+                if buf.len().saturating_add(insert_text.len()) >= max_str {
                     msgs.push(
                         b"Insert text pushes buffer over maximum size, insert aborted.\r\n"
                             .to_vec(),
@@ -1032,11 +1028,11 @@ fn parse_edit_action(
                 }
                 let mut new_buf: Vec<u8> = Vec::new();
                 if pos > 0 {
-                    append_within(&mut new_buf, &buf[..pos], MAX_STRING_LENGTH);
+                    new_buf.extend_from_slice(&buf[..pos]);
                 }
-                append_within(&mut new_buf, &insert_text, MAX_STRING_LENGTH);
+                new_buf.extend_from_slice(&insert_text);
                 if pos < buf.len() {
-                    append_within(&mut new_buf, &buf[pos..], MAX_STRING_LENGTH);
+                    new_buf.extend_from_slice(&buf[pos..]);
                 }
                 *buf = new_buf;
                 msgs.push(b"Line inserted.\r\n".to_vec());
@@ -1052,7 +1048,7 @@ fn parse_edit_action(
                 return;
             }
             let line_low = parse_int_prefix(&arg1);
-            append_within(&mut new_line, b"\r\n", MAX_STRING_LENGTH - 1);
+            new_line.extend_from_slice(b"\r\n");
 
             let mut i: i32 = 1;
             let max_str = eb.max_str;
@@ -1079,13 +1075,13 @@ fn parse_edit_action(
                 };
                 let mut new_buf: Vec<u8> = Vec::new();
                 if pos != 0 {
-                    append_within(&mut new_buf, &buf[..pos], MAX_STRING_LENGTH);
+                    new_buf.extend_from_slice(&buf[..pos]);
                 }
-                append_within(&mut new_buf, &new_line, MAX_STRING_LENGTH);
+                new_buf.extend_from_slice(&new_line);
                 if let Some(q) = find_nl(buf, pos) {
-                    append_within(&mut new_buf, &buf[q + 1..], MAX_STRING_LENGTH);
+                    new_buf.extend_from_slice(&buf[q + 1..]);
                 }
-                if new_buf.len() > max_str {
+                if new_buf.len() >= max_str {
                     msgs.push(
                         b"Change causes new length to exceed buffer maximum size, aborted.\r\n"
                             .to_vec(),
@@ -1417,6 +1413,43 @@ mod tests {
         eb.buf.as_deref().expect("buffer should exist")
     }
 
+    #[test]
+    fn oversized_line_numbers_do_not_wrap_into_real_lines() {
+        for operation in ['e', 'i', 'd'] {
+            for number in ["4294967297", "-4294967295", "18446744073709551617"] {
+                let mut eb = three_lines(); let original = buf(&eb).to_vec();
+                let command = format!("/{operation} {number} changed");
+                add(&mut eb, command.as_bytes());
+                assert_eq!(buf(&eb), original, "command={command}");
+            }
+        }
+    }
+
+    #[test]
+    fn decimal_parsers_saturate_without_changing_valid_prefixes() {
+        for (text, expected) in [
+            ("0", 0), (" +12tail", 12), ("-12tail", -12),
+            ("2147483647", i32::MAX), ("2147483648", i32::MAX),
+            ("-2147483648", i32::MIN), ("-2147483649", i32::MIN),
+            ("4294967297", i32::MAX), ("-4294967295", i32::MIN),
+            ("9223372036854775807", i32::MAX), ("-9223372036854775808", i32::MIN),
+        ] {
+            assert_eq!(parse_int_prefix(text.as_bytes()), expected);
+            let mut pos = 0; assert_eq!(scan_int(text.as_bytes(), &mut pos), Some(expected));
+            assert!(pos > 0);
+        }
+        for sign in ["", "-"] {
+            let text = format!("{sign}{}", "9".repeat(500));
+            let expected = if sign.is_empty() { i32::MAX } else { i32::MIN };
+            assert_eq!(parse_int_prefix(text.as_bytes()), expected);
+            let mut pos = 0; assert_eq!(scan_int(text.as_bytes(), &mut pos), Some(expected));
+            assert_eq!(pos, text.len());
+        }
+        assert_eq!(parse_int_prefix(b"word"), 0);
+        let mut pos = 0; assert_eq!(scan_int(b"word", &mut pos), None); assert_eq!(pos, 0);
+        assert_eq!(parse_range(b"4294967297-4294967298"), (2, i32::MAX, i32::MAX));
+    }
+
     // -- exported helpers ---------------------------------------------------
 
     #[test]
@@ -1611,6 +1644,58 @@ mod tests {
         let (_, m, _) = add(&mut eb, b"/d 4");
         assert_eq!(m, vec![b"0 lines deleted.\r\n".to_vec()]);
         assert_eq!(buf(&eb), b"one\r\ntwo\r\nthree\r\n");
+    }
+
+
+    #[test]
+    fn line_edits_reject_overflow_without_losing_the_document_tail() {
+        let mut original = b"x\r\n".to_vec();
+        original.extend(vec![b'z'; MAX_STRING_LENGTH - 10]);
+        original.extend_from_slice(b"END\r\n");
+        let mut eb = EditBuf { buf: Some(original.clone()), max_str: MAX_STRING_LENGTH };
+        let (_, messages, _) = add(&mut eb, b"/e 1 this line is too long");
+        assert_eq!(buf(&eb), original);
+        assert!(messages[0].windows(7).any(|w| w == b"aborted"));
+    }
+
+    #[test]
+    fn line_changes_preserve_large_buffers_and_accept_the_exact_capacity() {
+        let mut original = b"x\r\n".to_vec();
+        original.extend(vec![b'z'; MAX_STRING_LENGTH]);
+        original.extend_from_slice(b"END\r\n");
+        for command in [b"/e 1 y".as_slice(), b"/i 1 y".as_slice()] {
+            let expected = if command[1] == b'e' {
+                let mut out = original.clone(); out[0] = b'y'; out
+            } else {
+                let mut out = b"y\r\n".to_vec(); out.extend_from_slice(&original); out
+            };
+            let mut eb = EditBuf { buf: Some(original.clone()), max_str: expected.len() + 1 };
+            add(&mut eb, command);
+            assert_eq!(buf(&eb), expected);
+        }
+    }
+
+    #[test]
+    fn line_change_capacity_matrix_is_atomic() {
+        for original in [b"".as_slice(), b"one".as_slice(), b"one\r\n".as_slice(), b"one\r\ntwo\r\n".as_slice()] {
+            let starts: Vec<usize> = std::iter::once(0).chain(original.iter().enumerate().filter(|(_, b)| **b == b'\n').map(|(i, _)| i + 1)).collect();
+            for (line, &pos) in starts.iter().enumerate() {
+                for replacement in ["", "x", "longer replacement"] {
+                    for operation in ['e', 'i'] {
+                        let end = if operation == 'i' { pos } else { original[pos..].iter().position(|&b| b == b'\n').map_or(original.len(), |n| pos + n + 1) };
+                        let mut expected = original[..pos].to_vec();
+                        expected.extend_from_slice(replacement.as_bytes()); expected.extend_from_slice(b"\r\n"); expected.extend_from_slice(&original[end..]);
+                        for capacity in 0..=expected.len() + 2 {
+                            let mut eb = EditBuf { buf: Some(original.to_vec()), max_str: capacity };
+                            let command = format!("/{operation} {} {replacement}", line + 1);
+                            add(&mut eb, command.as_bytes());
+                            let want = if expected.len() < capacity { expected.as_slice() } else { original };
+                            assert_eq!(buf(&eb), want, "op={operation} line={line} capacity={capacity}");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // -- /e and /i -----------------------------------------------------------
