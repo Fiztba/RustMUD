@@ -10,7 +10,7 @@ use mud_data::types::*;
 use mud_world::model::ObjProto;
 
 use crate::db::{
-    add_to_save_list, in_save_list, remove_from_save_list, write_world_file, SL_OBJ, SL_ZON,
+    add_to_save_list, in_save_list, remove_from_save_list, write_world_file, SL_OBJ, SL_SHP, SL_ZON,
 };
 use crate::game::{Game, MudlogKind};
 
@@ -111,9 +111,9 @@ pub fn adjust_objects(g: &mut Game, refpt: Idx) -> Option<Idx> {
             }
         }
     }
-    // Notice boards. No NOTHING guard here — deliberate.
+    // Unresolved boards keep the sentinel until they are initialized.
     for r in g.boards.rnum.iter_mut() {
-        if *r >= refpt {
+        if *r != NOTHING && *r >= refpt {
             *r += 1;
         }
     }
@@ -222,11 +222,14 @@ pub fn delete_object(g: &mut Game, rnum: Idx) -> Option<Idx> {
     }
 
     for r in g.boards.rnum.iter_mut() {
-        if *r > rnum {
+        if *r == rnum {
+            *r = NOTHING;
+        } else if *r != NOTHING && *r > rnum {
             *r -= 1;
         }
     }
     for s in g.shops_rt.iter_mut() {
+        s.producing.retain(|&p| p != rnum);
         for p in s.producing.iter_mut() {
             if *p != NOTHING && *p > rnum {
                 *p -= 1;
@@ -234,65 +237,48 @@ pub fn delete_object(g: &mut Game, rnum: Idx) -> Option<Idx> {
         }
     }
 
-    // Zone commands. The 'P' arm falls through to O/G/E, so a
-    // deleted P command is followed by an arg1 test against whatever
-    // command shifted into its slot.
-    // Every zone whose table changes here needs writing back out.
-    let mut touched: Vec<Idx> = Vec::new();
-    for zi in 0..g.world.zones.len() {
-        let mut ci = 0usize;
-        let mut zone_touched = false;
-        while ci < g.world.zones[zi].cmds.len() {
-            let command = g.world.zones[zi].cmds[ci].command;
-            match command {
-                b'P' => {
-                    if g.world.zones[zi].cmds[ci].arg3 == rnum as i32 {
-                        g.world.zones[zi].cmds.remove(ci);
-                        zone_touched = true;
-                    } else if g.world.zones[zi].cmds[ci].arg3 > rnum as i32 {
-                        g.world.zones[zi].cmds[ci].arg3 -= 1;
-                        zone_touched = true;
-                    }
-                    if ci < g.world.zones[zi].cmds.len() {
-                        if g.world.zones[zi].cmds[ci].arg1 == rnum as i32 {
-                            g.world.zones[zi].cmds.remove(ci);
-                            zone_touched = true;
-                        } else if g.world.zones[zi].cmds[ci].arg1 > rnum as i32 {
-                            g.world.zones[zi].cmds[ci].arg1 -= 1;
-                            zone_touched = true;
-                        }
-                    }
-                }
-                b'O' | b'G' | b'E' => {
-                    if g.world.zones[zi].cmds[ci].arg1 == rnum as i32 {
-                        g.world.zones[zi].cmds.remove(ci);
-                        zone_touched = true;
-                    } else if g.world.zones[zi].cmds[ci].arg1 > rnum as i32 {
-                        g.world.zones[zi].cmds[ci].arg1 -= 1;
-                        zone_touched = true;
-                    }
-                }
-                b'R' => {
-                    if g.world.zones[zi].cmds[ci].arg2 == rnum as i32 {
-                        g.world.zones[zi].cmds.remove(ci);
-                        zone_touched = true;
-                    } else if g.world.zones[zi].cmds[ci].arg2 > rnum as i32 {
-                        g.world.zones[zi].cmds[ci].arg2 -= 1;
-                        zone_touched = true;
-                    }
-                }
-                _ => {}
+    let mut changed_shops = Vec::new();
+    for shop in &mut g.world.shops {
+        let count = shop.producing.len();
+        shop.producing.retain(|&p| p != vnum as i32);
+        if shop.producing.len() != count {
+            changed_shops.push(shop.vnum);
+        }
+    }
+    for shop_vnum in changed_shops {
+        if let Some(zone) = crate::dg::mobcmd::real_zone_by_thing(g, shop_vnum as i32) {
+            add_to_save_list(g, g.world.zones[zone].number, SL_SHP);
+        }
+    }
+
+    // Process every original reset once, including adjacent deletions.
+    let mut touched = Vec::new();
+    for zone in &mut g.world.zones {
+        let mut changed = false;
+        zone.cmds.retain_mut(|cmd| {
+            let refs: Vec<&mut i32> = match cmd.command {
+                b'P' => vec![&mut cmd.arg1, &mut cmd.arg3],
+                b'O' | b'G' | b'E' => vec![&mut cmd.arg1],
+                b'R' => vec![&mut cmd.arg2],
+                _ => return true,
+            };
+            if refs.iter().any(|value| **value == rnum as i32) {
+                changed = true;
+                return false;
             }
-            ci += 1;
-        }
-        if zone_touched {
-            touched.push(g.world.zones[zi].number);
-        }
+            for value in refs {
+                if *value > rnum as i32 && *value != NOTHING as i32 {
+                    *value -= 1;
+                    changed = true;
+                }
+            }
+            true
+        });
+        if changed { touched.push(zone.number); }
     }
     for zvnum in touched {
         add_to_save_list(g, zvnum, SL_ZON);
     }
-
     // Flag rather than write; oedit's delete branch honours the toggle.
     if let Some(z) = zrnum {
         let zvnum = g.world.zones[z].number;
