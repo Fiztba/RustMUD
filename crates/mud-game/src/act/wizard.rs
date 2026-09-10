@@ -3229,7 +3229,12 @@ pub fn do_zpurge(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subc
         send_to_char(g, chid, b"That isn't a valid zone number!\r\n");
         return;
     }
-    if g.ch(chid).level < LVL_GOD && !crate::dg::commands::can_edit_zone(g, chid, Some(zone)) {
+    let permitted = if purge_all {
+        (0..g.world.zones.len()).all(|z| crate::dg::commands::can_edit_zone(g, chid, Some(z)))
+    } else {
+        crate::dg::commands::can_edit_zone(g, chid, Some(zone))
+    };
+    if g.ch(chid).level < LVL_GOD && !permitted {
         send_to_char(g, chid, b"You can only purge your own zone!\r\n");
         return;
     }
