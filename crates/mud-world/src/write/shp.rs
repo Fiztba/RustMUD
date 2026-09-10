@@ -5,8 +5,8 @@
 //! order, then "$~\n".
 //!
 //! Layout per shop: "#<vnum>~", producing vnums + "-1", the two profits as
-//! "%1.2f", buy-types as "%d%s" (keyword glued straight after the number,
-//! with a separating space for digit-leading keywords), "-1", the seven messages + temper/bitvector/keeper/with_who
+//! "%1.2f", buy-types as "%d%s" (with a separating space for digit-leading
+//! keywords), "-1", the seven messages + temper/bitvector/keeper/with_who
 //! (this block alone passes through convert_from_tabs — parse_tab turns
 //! '\t' back into '@' except that a "\t\t" pair is left alone; \r is NOT
 //! stripped), rooms + "-1", and the four hours. NULL messages fall back to
@@ -168,17 +168,25 @@ mod tests {
     fn digit_leading_keywords_survive_reload() {
         let mut world = World::default();
         world.zones.push(Zone { number: 0, bot: 0, top: 99, ..Default::default() });
+        let keywords = [b"2hand | sword".as_slice(), b"0", b"99blade", b"sword", b"!sword", b"+sword"];
         world.shops.push(Shop {
             vnum: 5,
-            type_list: vec![ShopBuyData { type_: 5, keywords: Some(b"2hand | sword".to_vec()) }],
+            type_list: Vec::new(),
             ..Default::default()
         });
-        let bytes = write_file(&world, 0);
-        let mut loaded = World::default();
-        parse::shp::parse_file(&mut loaded, &bytes, "test.shp").unwrap();
-        assert_eq!(loaded.shops[0].type_list.len(), 1);
-        assert_eq!(loaded.shops[0].type_list[0].type_, 5);
-        assert_eq!(loaded.shops[0].type_list[0].keywords.as_deref(), Some(b"2hand | sword".as_slice()));
+        for type_ in 0..mud_data::flags::NUM_ITEM_TYPES as i32 {
+            world.shops[0].type_list = keywords.iter().map(|keyword| ShopBuyData {
+                type_, keywords: Some(keyword.to_vec()),
+            }).collect();
+            let bytes = write_file(&world, 0);
+            let mut loaded = World::default();
+            parse::shp::parse_file(&mut loaded, &bytes, "test.shp").unwrap();
+            assert_eq!(loaded.shops[0].type_list.len(), keywords.len());
+            for (entry, keyword) in loaded.shops[0].type_list.iter().zip(keywords) {
+                assert_eq!(entry.type_, type_);
+                assert_eq!(entry.keywords.as_deref(), Some(keyword));
+            }
+        }
     }
 
     #[test]
