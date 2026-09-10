@@ -1,4 +1,4 @@
-use mud_data::{flags, types::*};
+use mud_data::types::*;
 use mud_game::{ch::{Char, PlayerSpecials}, game::Game};
 use mud_net::descriptor::Descriptor;
 use std::path::{Path, PathBuf};
@@ -57,11 +57,20 @@ fn mentioning_a_player_in_the_subject_does_not_make_them_the_author() {
     mud_game::handler::obj_to_room(g, board, 0);
     let write = mud_game::interpreter::find_command(g, b"write").unwrap(); let remove = mud_game::interpreter::find_command(g, b"remove").unwrap();
     mud_game::boards::gen_board(g, writer, board, write, b""); mud_game::boards::board_clear_all(g);
-    mud_game::boards::gen_board(g, writer, board, write, b"A message for (Bob)");
-    let slot = g.boards.msgs[0][0].slot_num; g.descriptors.get_mut(writer_di).unwrap().editing = None;
-    mud_game::boards::board_finish_write(g, writer, slot, 0, Some(b"Message body".to_vec()));
-    assert!(mud_game::boards::gen_board(g, reader, board, remove, b"1"));
-    assert_eq!(g.boards.msgs[0].len(), 1);
-    assert!(mud_game::boards::gen_board(g, writer, board, remove, b"1"));
-    assert!(g.boards.msgs[0].is_empty());
+    for subject in [&b"A message for (Bob)"[..], b"(Bob) :: (Bob)", b"Nothing special"] {
+        for (author_level, reader_level, can_remove) in [(10, 10, false), (10, LVL_GOD, true), (LVL_IMPL, LVL_GOD, false)] {
+            g.ch_mut(writer).level = author_level; g.ch_mut(reader).level = reader_level;
+            mud_game::boards::gen_board(g, writer, board, write, subject);
+            let slot = g.boards.msgs[0][0].slot_num; g.descriptors.get_mut(writer_di).unwrap().editing = None;
+            mud_game::boards::board_finish_write(g, writer, slot, 0, Some(b"Message body".to_vec()));
+            // Exercise the persisted heading as well as the fresh in-memory one.
+            g.boards.loaded = false;
+            assert!(mud_game::boards::gen_board(g, reader, board, remove, b"1"));
+            assert_eq!(g.boards.msgs[0].len(), if can_remove { 0 } else { 1 });
+            if !can_remove {
+                assert!(mud_game::boards::gen_board(g, writer, board, remove, b"1"));
+                assert!(g.boards.msgs[0].is_empty());
+            }
+        }
+    }
 }
