@@ -58,12 +58,22 @@ fn stealing_large_balances_preserves_gold_at_the_receiver_limit() {
     g.ch_mut(victim).position = POS_SLEEPING;
     g.config.pt_setting = 2;
     g.world.rooms[0].room_flags = [0; 4];
-    for (balance, expected) in [(0, 1782), (MAX_GOLD - 5, 5), (MAX_GOLD, 0)] {
+    for source in [0, 1, 99, 100, 17820, MAX_GOLD] {
+      for balance in [0, MAX_GOLD - 5, MAX_GOLD] {
+       for seed in 1..=20 {
+        let mut rng = mud_data::rng::CircleRng::new(seed);
+        rng.rand_number(1, 101);
+        let expected = ((i64::from(source) * i64::from(rng.rand_number(1, 10))) / 100)
+            .min(1782).min(i64::from(MAX_GOLD - balance)) as i32;
         g.ch_mut(thief).points.gold = balance;
-        g.ch_mut(victim).points.gold = MAX_GOLD;
-        g.rng = mud_data::rng::CircleRng::new(12345);
+        g.ch_mut(victim).points.gold = source;
+        g.rng = mud_data::rng::CircleRng::new(seed);
         mud_game::act::other::do_steal(g, thief, b"gold Victim", 0, 0);
         assert_eq!(g.ch(thief).points.gold, balance + expected);
-        assert_eq!(g.ch(victim).points.gold, MAX_GOLD - expected);
+        assert_eq!(g.ch(victim).points.gold, source - expected);
+        assert_eq!(i64::from(g.ch(thief).points.gold) + i64::from(g.ch(victim).points.gold),
+            i64::from(balance) + i64::from(source));
+       }
+      }
     }
 }
