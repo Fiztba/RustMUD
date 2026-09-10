@@ -166,6 +166,7 @@ fn char_to_playerfile(g: &Game, chid: CharId, affects: &[Affect]) -> PlayerFile 
         questpoints: ps.questpoints,
         quest_counter: ps.quest_counter,
         current_quest: ps.current_quest as i32,
+        quest_time: Some(ps.quest_time),
         completed_quests: ps.completed_quests.clone(),
         triggers: ch
             .script
@@ -253,6 +254,16 @@ pub fn load_char_into(g: &mut Game, chid: CharId, name: &[u8]) -> Option<usize> 
     for line in syserrs {
         g.log(line);
     }
+    // Legacy files omitted the timer; give their active quest its configured
+    // limit once rather than turning a timed quest into an unlimited one.
+    let quest_time = if pf.current_quest == NOTHING as i32 {
+        -1
+    } else {
+        pf.quest_time.unwrap_or_else(|| {
+            crate::quest::real_quest(g, pf.current_quest)
+                .map_or(-1, |rnum| g.world.quests[rnum].time)
+        })
+    };
     {
         let ch = g.ch_mut(chid);
         let di = ch.desc;
@@ -322,6 +333,7 @@ pub fn load_char_into(g: &mut Game, chid: CharId, name: &[u8]) -> Option<usize> 
             ps.questpoints = pf.questpoints;
             ps.quest_counter = pf.quest_counter;
             ps.current_quest = pf.current_quest.clamp(0, 65535) as Idx;
+            ps.quest_time = quest_time;
             ps.num_completed_quests = pf.completed_quests.len() as i32;
             ps.completed_quests = pf.completed_quests.clone();
             ps.pref = FlagSet::from_words(pf.prf_flags);

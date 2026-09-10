@@ -409,8 +409,8 @@ pub fn check_timed_quests(g: &mut Game) {
         if ps.current_quest == NOTHING || ps.quest_time == -1 {
             continue;
         }
-        g.ch_mut(chid).ps_mut().quest_time -= 1;
-        if g.ch(chid).ps().quest_time == 0 {
+        g.ch_mut(chid).ps_mut().quest_time = ps.quest_time.saturating_sub(1);
+        if g.ch(chid).ps().quest_time <= 0 {
             quest_timeout(g, chid);
         }
     }
