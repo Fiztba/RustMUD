@@ -204,7 +204,7 @@ pub struct Char {
     pub hunting: Option<CharId>,
     pub position: u8,
     pub carry_weight: i32,
-    pub carry_items: u8,
+    pub carry_items: i32,
     pub timer: i32,
     pub alignment: i32,
     pub idnum: i64,
