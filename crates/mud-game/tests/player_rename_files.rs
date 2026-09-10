@@ -66,3 +66,38 @@ fn failed_file_rename_keeps_player_identity_and_original_files() {
     assert_eq!(g.player_table.last().unwrap().name, b"oldname");
     assert_eq!(std::fs::read(old).unwrap(), b"original inventory");
 }
+
+fn all_files_case(locked: bool) {
+    let mut f = fixture(if locked { "locked" } else { "success" }); let g = &mut f.game;
+    let actor = player(g, b"Admin", 12345); let victim = player(g, b"Oldname", 12346);
+    descriptor(g, actor, ConState::Playing);
+    g.player_table.push(mud_game::game::PlayerIndexElement {
+        name: b"oldname".to_vec(), id: 12346, level: 10, flags: 0, last: g.now,
+    });
+    use mud_world::players::{get_filename, FileKind};
+    let mut paths = vec![];
+    for kind in [FileKind::Plr, FileKind::Objs, FileKind::Text, FileKind::Vars] {
+        let old = g.lib_dir.join(get_filename(kind, b"Oldname").unwrap());
+        let new = g.lib_dir.join(get_filename(kind, b"Newname").unwrap());
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(new.parent().unwrap()).unwrap();
+        let data = format!("original file {}", paths.len()).into_bytes();
+        std::fs::write(&old, &data).unwrap(); paths.push((old, new, data));
+    }
+    #[cfg(windows)]
+    let lock = if locked {
+        use std::os::windows::fs::OpenOptionsExt;
+        Some(std::fs::OpenOptions::new().read(true).share_mode(0).open(&paths[1].0).unwrap())
+    } else { None };
+    assert_eq!(mud_game::act::wizset::change_player_name(g, actor, victim, b"Newname"), !locked);
+    #[cfg(windows)] drop(lock);
+    assert_eq!(g.ch(victim).get_name(), if locked { b"Oldname" } else { b"Newname" });
+    assert_eq!(g.player_table.last().unwrap().name, if locked { b"oldname" } else { b"newname" });
+    for (old, new, data) in paths {
+        assert_eq!(std::fs::read(if locked { &old } else { &new }).unwrap(), data);
+        assert!(!if locked { new } else { old }.exists());
+    }
+}
+#[test] fn successful_rename_moves_all_four_files() { all_files_case(false); }
+#[cfg(windows)]
+#[test] fn later_file_failure_rolls_back_earlier_move() { all_files_case(true); }
