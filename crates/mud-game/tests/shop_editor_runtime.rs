@@ -53,12 +53,13 @@ fn saving_shop_edits_preserves_runtime_changes_since_the_editor_opened() {
     let mut f = fixture("live"); let g = &mut f.game;
     let admin = player(g, b"Admin", 12345); g.ch_mut(admin).level = LVL_IMPL;
     let di = descriptor(g, admin, ConState::Sedit); g.config.auto_save_olc = false;
-    g.shops_rt[0].bank = 100; g.shops_rt[0].sort = 2;
+    g.shops_rt[0].bank = 100; g.shops_rt[0].sort = 2; g.shops_rt[0].func = None;
     let mut olc = OlcData::new(); sedit_setup_existing(g, &mut olc, 0); olc.number = g.world.shops[0].vnum as i32;
-    g.shops_rt[0].bank = 350; g.shops_rt[0].sort = 7;
+    g.shops_rt[0].bank = 350; g.shops_rt[0].sort = 7; g.shops_rt[0].func = Some(mud_game::spec::MobSpec::Postmaster);
     olc.mode = SEDIT_CONFIRM_SAVESTRING;
     assert!(sedit_parse(g, di, olc, b"y").is_none());
     assert_eq!((g.shops_rt[0].bank, g.shops_rt[0].sort), (350, 7));
+    assert_eq!(g.shops_rt[0].func, Some(mud_game::spec::MobSpec::Postmaster));
 }
 #[test]
 fn copying_a_shop_does_not_copy_its_runtime_money_or_sort_state() {
@@ -74,4 +75,14 @@ fn copying_a_shop_does_not_copy_its_runtime_money_or_sort_state() {
     let old = mud_game::olc::genshp::real_shop(g, source as i32).unwrap();
     assert_eq!((g.shops_rt[new].bank, g.shops_rt[new].sort), (0, 0));
     assert_eq!((g.shops_rt[old].bank, g.shops_rt[old].sort), (900, 42));
+    g.shops_rt[new].bank = 700; g.shops_rt[new].sort = 17;
+    let mut olc = OlcData::new(); sedit_setup_existing(g, &mut olc, old); olc.number = 65534;
+    olc.mode = SEDIT_CONFIRM_SAVESTRING;
+    assert!(sedit_parse(g, di, olc, b"y").is_none());
+    assert_eq!((g.shops_rt[new].bank, g.shops_rt[new].sort), (700, 17));
+    let mut olc = OlcData::new(); sedit_setup_existing(g, &mut olc, new); olc.number = 65534;
+    olc.shop_keeper = if g.shops_rt[new].keeper == 0 { 1 } else { 0 };
+    olc.mode = SEDIT_CONFIRM_SAVESTRING;
+    assert!(sedit_parse(g, di, olc, b"y").is_none());
+    assert_eq!((g.shops_rt[new].bank, g.shops_rt[new].sort), (700, 0));
 }
