@@ -524,6 +524,15 @@ pub fn spell_enchant_weapon(g: &mut Game, level: i32, chid: CharId, _victim: Opt
         o.affected[1].modifier = 1 + if level >= 20 { 1 } else { 0 };
     }
 
+    if let Some(wearer) = g.obj(oid).worn_by {
+        let bonuses = g.obj(oid).affected;
+        for bonus in bonuses {
+            crate::handler::affect_modify_ar(g, wearer, bonus.location, bonus.modifier, flags::FlagSet::EMPTY, true);
+        }
+        crate::handler::affect_total(g, wearer);
+        g.ch_mut(wearer).act.set(flags::PLR_CRASH);
+    }
+
     let align = g.ch(chid).alignment;
     if align >= 350 {
         g.obj_mut(oid).extra_flags.set(flags::ITEM_ANTI_EVIL);
