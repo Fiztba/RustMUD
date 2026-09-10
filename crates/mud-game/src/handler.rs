@@ -458,6 +458,22 @@ pub fn change_object_weight(g: &mut Game, oid: ObjId, delta: i32) {
     mark_object_changed(g, oid);
 }
 
+/// Retain contents when replacing a live object's prototype, with the new weight gate.
+pub(crate) fn update_prototype_weight(g: &mut Game, oid: ObjId, proto: &mud_world::model::ObjProto) -> bool {
+    let tracks_contents = proto.values[0] > 0
+        || (proto.type_flag == flags::ITEM_CONTAINER && proto.values[3] == 1);
+    let weight = if tracks_contents {
+        g.obj(oid).contains.iter().try_fold(proto.weight, |weight, &child| weight.checked_add(g.obj(child).weight))
+    } else { Some(proto.weight) };
+    let Some(weight) = weight else {
+        g.log("SYSERR: Replacement object and contents exceed the weight range.".to_string());
+        return false;
+    };
+    let Some(delta) = weight.checked_sub(g.obj(oid).weight) else { return false };
+    change_object_weight(g, oid, delta);
+    g.obj(oid).weight == weight
+}
+
 /// Put obj into container; each ancestor's weight gate applies independently.
 pub fn obj_to_obj(g: &mut Game, oid: ObjId, into: ObjId) {
     if oid == into {

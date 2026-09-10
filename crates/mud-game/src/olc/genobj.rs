@@ -41,10 +41,13 @@ fn update_all_objects(g: &mut Game, rnum: Idx) -> i32 {
     let proto = g.world.obj_protos[rnum as usize].clone();
     let mut count = 0;
     for id in g.object_list.clone() {
-        let Some(o) = g.objs.get_mut(id) else { continue };
-        if o.item_number != rnum {
-            continue;
-        }
+        let Some(o) = g.objs.get(id) else { continue };
+        if o.item_number != rnum { continue; }
+        let (wearer, pos) = (o.worn_by, o.worn_on);
+        if !crate::handler::update_prototype_weight(g, id, &proto) { continue; }
+        if let Some(chid) = wearer { crate::handler::unequip_char(g, chid, pos as usize); }
+        crate::dg::extract_script(g, crate::dg::GoId::Obj(id));
+        let o = g.objs.get_mut(id).unwrap();
         count += 1;
         // *obj = *refobj, then the placement fields are put back.
         o.values = proto.values;
@@ -52,7 +55,6 @@ fn update_all_objects(g: &mut Game, rnum: Idx) -> i32 {
         o.wear_flags = mud_data::flags::FlagSet::from_words(proto.wear_flags);
         o.extra_flags = mud_data::flags::FlagSet::from_words(proto.extra_flags);
         o.perm_affects = mud_data::flags::FlagSet::from_words(proto.perm_affects);
-        o.weight = proto.weight;
         o.cost = proto.cost;
         o.cost_per_day = proto.cost_per_day;
         o.level = proto.level;
@@ -68,6 +70,7 @@ fn update_all_objects(g: &mut Game, rnum: Idx) -> i32 {
         o.proto_script = proto.proto_script.clone();
         // SCRIPT(obj) comes from the prototype too — i.e. NULL.
         o.script = None;
+        if let Some(chid) = wearer { crate::handler::equip_char(g, chid, id, pos as usize); }
     }
     count
 }
