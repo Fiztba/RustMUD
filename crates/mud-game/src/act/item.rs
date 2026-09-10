@@ -800,9 +800,15 @@ fn perform_give(g: &mut Game, chid: CharId, vict: CharId, oid: ObjId) {
     }
     obj_from_char(g, oid);
     obj_to_char(g, oid, vict);
+    let gift_is_held = |g: &Game| g.try_ch(chid).is_some() && g.try_ch(vict).is_some()
+        && g.try_obj(oid).is_some_and(|o| o.carried_by == Some(vict));
+    if !gift_is_held(g) { return; }
     act(g, b"You give $p to $N.", false, Some(chid), Some(oid), Some(vict), comm::TO_CHAR);
+    if !gift_is_held(g) { return; }
     act(g, b"$n gives you $p.", false, Some(chid), Some(oid), Some(vict), comm::TO_VICT);
+    if !gift_is_held(g) { return; }
     act(g, b"$n gives $p to $N.", true, Some(chid), Some(oid), Some(vict), comm::TO_NOTVICT);
+    if !gift_is_held(g) { return; }
     crate::quest::autoquest_trigger_check(g, chid, Some(vict), Some(oid), crate::quest::AQ_OBJ_RETURN);
 }
 

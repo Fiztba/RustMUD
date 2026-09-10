@@ -388,9 +388,12 @@ pub fn autoquest_trigger_check(
                     && crate::dg::mob_vnum(g, v) == return_mob
                 {
                     if let Some(oid) = object {
-                        if crate::dg::obj_vnum(g, oid) == target {
+                        if g.try_obj(oid).is_some_and(|o| o.carried_by == Some(v))
+                            && crate::dg::obj_vnum(g, oid) == target {
                             generic_complete_quest(g, chid);
-                            crate::handler::extract_obj(g, oid);
+                            if g.try_obj(oid).is_some_and(|o| o.carried_by == Some(v)) {
+                                crate::handler::extract_obj(g, oid);
+                            }
                         }
                     }
                 }
