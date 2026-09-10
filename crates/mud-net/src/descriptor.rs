@@ -978,6 +978,41 @@ mod tests {
     }
 
     #[test]
+    fn paired_line_endings_survive_single_byte_reads_and_protocol_messages() {
+        use crate::telnet::*;
+        let mut d = desc();
+        for &byte in b"name\r\npassword\r\n" {
+            d.feed_input_test(&[byte]).unwrap();
+            d.feed_input_test(&[IAC, WILL, TELOPT_NAWS]).unwrap();
+        }
+        let lines: Vec<_> = d.input.into_iter().map(|line| line.0).collect();
+        assert_eq!(lines, vec![b"name".to_vec(), b"password".to_vec()]);
+    }
+
+    #[test]
+    fn deliberate_blank_commands_survive_completed_pairs_and_bare_newlines() {
+        for ending in [b"\r\n".as_slice(), b"\n\r", b"\r", b"\n"] {
+            let mut d = desc();
+            d.feed_input_test(b"look").unwrap();
+            d.feed_input_test(ending).unwrap();
+            d.feed_input_test(ending).unwrap();
+            d.feed_input_test(ending).unwrap();
+            let lines: Vec<_> = d.input.into_iter().map(|line| line.0).collect();
+            assert_eq!(lines, vec![b"look".to_vec(), vec![], vec![]]);
+        }
+    }
+
+    #[test]
+    fn unpaired_terminator_does_not_swallow_the_next_command() {
+        let mut d = desc();
+        for chunk in [b"north\r".as_slice(), b"south", b"\n", b"east\r\n"] {
+            d.feed_input_test(chunk).unwrap();
+        }
+        let lines: Vec<_> = d.input.into_iter().map(|line| line.0).collect();
+        assert_eq!(lines, vec![b"north".to_vec(), b"south".to_vec(), b"east".to_vec()]);
+    }
+
+    #[test]
     fn bang_recalls_last_input() {
         let mut d = desc();
         d.feed_input_test(b"north\r\n!\r\n").unwrap();
