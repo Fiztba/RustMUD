@@ -164,6 +164,17 @@ pub fn run_autowiz(g: &mut Game) {
     crate::text::reboot_wizlists(g);
 }
 
+/// The positive award after the happy-hour bonus and per-award cap.
+/// Shared with combat messages so reporting never applies the bonus twice.
+pub(crate) fn experience_award(g: &Game, chid: CharId, gain: i32) -> i32 {
+    if gain <= 0 || g.ch(chid).is_npc() { return gain; }
+    let mut award = i64::from(gain);
+    if crate::act::other::is_happyhour(g) && g.happy.exp_rate > 0 {
+        award += award * i64::from(g.happy.exp_rate) / 100;
+    }
+    award.min(i64::from(g.config.max_exp_gain)) as i32
+}
+
 pub fn gain_exp(g: &mut Game, chid: CharId, mut gain: i32) {
     let (is_npc, level) = {
         let ch = g.ch(chid);
@@ -178,10 +189,7 @@ pub fn gain_exp(g: &mut Game, chid: CharId, mut gain: i32) {
         return;
     }
     if gain > 0 {
-        if crate::act::other::is_happyhour(g) && g.happy.exp_rate > 0 {
-            gain += (gain as f32 * (g.happy.exp_rate as f32 / 100.0)) as i32;
-        }
-        gain = gain.min(g.config.max_exp_gain);
+        gain = experience_award(g, chid, gain);
         g.ch_mut(chid).points.exp += gain;
         let mut num_levels = 0;
         let cap = LVL_IMMORT as i32 - if g.config.no_mort_to_immort { 1 } else { 0 };
@@ -240,10 +248,7 @@ pub fn gain_exp(g: &mut Game, chid: CharId, mut gain: i32) {
 
 /// gain_exp_regardless: no cap, no level gate, and it
 /// keeps advancing all the way to LVL_IMPL.
-pub fn gain_exp_regardless(g: &mut Game, chid: CharId, mut gain: i32) {
-    if crate::act::other::is_happyhour(g) && g.happy.exp_rate > 0 {
-        gain += (gain as f32 * (g.happy.exp_rate as f32 / 100.0)) as i32;
-    }
+pub fn gain_exp_regardless(g: &mut Game, chid: CharId, gain: i32) {
     g.ch_mut(chid).points.exp += gain;
     if g.ch(chid).points.exp < 0 {
         g.ch_mut(chid).points.exp = 0;

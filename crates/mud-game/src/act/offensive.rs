@@ -587,4 +587,5 @@ pub fn do_bandage(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _sub
     act(g, b"$n bandages $N, who looks a bit better now.", true, Some(chid), None, Some(vict), TO_NOTVICT);
     act(g, b"Someone bandages you, and you feel a bit better now.", false, Some(chid), None, Some(vict), TO_VICT);
     g.ch_mut(vict).points.hit = 0;
+    crate::fight::update_pos(g, vict);
 }

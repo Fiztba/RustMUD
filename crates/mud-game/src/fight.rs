@@ -419,13 +419,8 @@ pub fn die(g: &mut Game, chid: CharId, killer: Option<CharId>) {
 }
 
 fn perform_group_gain(g: &mut Game, chid: CharId, base: i32, victim: CharId) {
-    let mut share = g.config.max_exp_gain.min(base.max(1));
-    if crate::act::other::is_happyhour(g) && g.happy.exp_rate > 0 {
-        // "This only reports the correct amount - the calc is done in
-        // gain_exp".
-        let hap = share + (share as f32 * (g.happy.exp_rate as f32 / 100.0)) as i32;
-        share = g.config.max_exp_gain.min(hap.max(1));
-    }
+    let base = g.config.max_exp_gain.min(base.max(1));
+    let share = crate::limits::experience_award(g, chid, base);
     if share > 1 {
         send_to_char(
             g,
@@ -435,7 +430,7 @@ fn perform_group_gain(g: &mut Game, chid: CharId, base: i32, victim: CharId) {
     } else {
         send_to_char(g, chid, b"You receive your share of experience -- one measly little point!\r\n");
     }
-    crate::limits::gain_exp(g, chid, share);
+    crate::limits::gain_exp(g, chid, base);
     change_alignment(g, chid, victim);
 }
 
@@ -475,14 +470,9 @@ fn solo_gain(g: &mut Game, chid: CharId, victim: CharId) {
     }
     exp = exp.max(1);
 
-    if crate::act::other::is_happyhour(g) && g.happy.exp_rate > 0 {
-        // Reporting only — gain_exp applies the bonus to the credit
-        let happy_exp = exp + (exp as f32 * (g.happy.exp_rate as f32 / 100.0)) as i32;
-        exp = happy_exp.max(1);
-    }
-
-    if exp > 1 {
-        send_to_char(g, chid, format!("You receive {} experience points.\r\n", exp).as_bytes());
+    let reported = crate::limits::experience_award(g, chid, exp);
+    if reported > 1 {
+        send_to_char(g, chid, format!("You receive {} experience points.\r\n", reported).as_bytes());
     } else {
         send_to_char(g, chid, b"You receive one lousy experience point.\r\n");
     }
