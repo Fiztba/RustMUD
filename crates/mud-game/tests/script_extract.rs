@@ -43,4 +43,15 @@ fn extract_stops_at_the_end_of_the_input_and_continues_the_script() {
     let vars = &g.script_of(go).unwrap().global_vars;
     assert!(vars.iter().any(|v| v.name == b"result" && v.value.is_empty()));
     assert!(vars.iter().any(|v| v.name == b"continued" && v.value == b"yes"));
+    for (input, words) in [("", vec![]), ("ONE", vec!["one"]), ("  ONE  Two   THREE ", vec!["one", "two", "three"])] {
+        for n in [1, 2, 3, 4, i32::MAX] {
+            g.script_of_mut(go).unwrap().global_vars.clear();
+            g.world.triggers[nr as usize].cmdlist[0] = format!("extract result {n} {input}").into_bytes();
+            dg::driver::script_driver(g, go, iid, dg::TRIG_NEW);
+            let vars = &g.script_of(go).unwrap().global_vars;
+            let expected = words.get(n as usize - 1).copied().unwrap_or("");
+            assert!(vars.iter().any(|v| v.name == b"result" && v.value == expected.as_bytes()), "input={input}, n={n}");
+            assert!(vars.iter().any(|v| v.name == b"continued" && v.value == b"yes"));
+        }
+    }
 }
