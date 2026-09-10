@@ -56,11 +56,27 @@ fn pouring_preserves_poison_when_the_source_empties() {
     let source = object(g, ch, b"source"); let dest = object(g, ch, b"dest");
     g.obj_mut(source).type_flag = mud_data::flags::ITEM_DRINKCON;
     g.obj_mut(dest).type_flag = mud_data::flags::ITEM_DRINKCON;
-    g.obj_mut(source).values = [10, 5, 0, 1];
-    g.obj_mut(dest).values = [10, 0, 0, 0];
-    mud_game::act::item::do_pour(g, ch, b"source dest", 0, mud_game::interpreter::SCMD_POUR);
-    assert_eq!(g.obj(dest).values, [10, 5, 0, 1]);
-    assert_eq!(g.obj(source).values, [10, 0, 0, 0]);
+    for source_poison in [0, 1] { for dest_poison in [0, 1] { for capacity in [2, 10] {
+        g.obj_mut(source).values = [10, 5, 0, source_poison];
+        g.obj_mut(dest).values = [capacity, 0, 0, dest_poison];
+        let old_weight = g.ch(ch).carry_weight;
+        mud_game::act::item::do_pour(g, ch, b"source dest", 0, mud_game::interpreter::SCMD_POUR);
+        let amount = capacity.min(5);
+        assert_eq!(g.obj(dest).values, [capacity, amount, 0, source_poison | dest_poison]);
+        assert_eq!(g.obj(source).values, [10, 5 - amount, 0, if amount == 5 { 0 } else { source_poison }]);
+        assert_eq!(g.ch(ch).carry_weight, old_weight);
+    } } }
+    mud_game::handler::obj_from_char(g, source);
+    mud_game::handler::obj_to_room(g, source, 0);
+    g.obj_mut(source).type_flag = mud_data::flags::ITEM_FOUNTAIN;
+    for capacity in [10, -1] {
+        g.obj_mut(source).values = [capacity, 5, 0, 1];
+        g.obj_mut(dest).values = [10, 0, 0, 0];
+        mud_game::act::item::do_pour(g, ch, b"dest source", 0, mud_game::interpreter::SCMD_FILL);
+        assert_eq!(g.obj(dest).values[3], 1);
+        assert_eq!(g.obj(dest).values[1], if capacity < 0 { 10 } else { 5 });
+    }
+
 }
 
 fn object(g: &mut Game, ch: mud_data::ids::CharId, name: &[u8]) -> mud_data::ids::ObjId {
@@ -77,12 +93,17 @@ fn wear_all_checks_each_matching_items_level() {
     let ch = player(g, b"Customer", 12345);
     descriptor(g, ch, ConState::Playing);
     mud_game::handler::char_to_room(g, ch, 0); g.rooms[0].light = 1;
-    let high = object(g, ch, b"ring"); let low = object(g, ch, b"ring");
-    for oid in [high, low] { g.obj_mut(oid).wear_flags.set(mud_data::flags::ITEM_WEAR_FINGER); }
-    g.obj_mut(high).level = 30; g.obj_mut(low).level = 1;
-    mud_game::act::item::do_wear(g, ch, b"all.ring", 0, 0);
-    assert_eq!(g.obj(low).worn_by, Some(ch));
-    assert_eq!(g.obj(high).carried_by, Some(ch));
+    for reverse in [false, true] {
+        let first = object(g, ch, b"ring"); let second = object(g, ch, b"ring");
+        let (high, low) = if reverse { (second, first) } else { (first, second) };
+        for oid in [high, low] { g.obj_mut(oid).wear_flags.set(mud_data::flags::ITEM_WEAR_FINGER); }
+        g.obj_mut(high).level = 30; g.obj_mut(low).level = 1;
+        mud_game::act::item::do_wear(g, ch, b"all.ring", 0, 0);
+        assert_eq!(g.obj(low).worn_by, Some(ch));
+        assert_eq!(g.obj(high).carried_by, Some(ch));
+        for oid in [high, low] { mud_game::handler::extract_obj(g, oid); }
+    }
+
 }
 
 #[test]
@@ -91,7 +112,7 @@ fn donations_only_select_configured_existing_rooms() {
     let ch = player(g, b"Customer", 12345);
     descriptor(g, ch, ConState::Playing);
     mud_game::handler::char_to_room(g, ch, 0); g.rooms[0].light = 1;
-    for mask in [7, 4, 2, 1, 5, 0] {
+    for mask in 0..8 {
         g.config.donation_room_1 = if mask & 1 != 0 { g.world.rooms[1].vnum as i32 } else { NOWHERE as i32 };
         g.config.donation_room_2 = if mask & 2 != 0 { g.world.rooms[2].vnum as i32 } else { NOWHERE as i32 };
         g.config.donation_room_3 = if mask & 4 != 0 { g.world.rooms[3].vnum as i32 } else { NOWHERE as i32 };
