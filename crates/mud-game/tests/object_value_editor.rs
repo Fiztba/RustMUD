@@ -54,10 +54,17 @@ fn liquid_type_selection_clamps_minimum_integer_without_overflow() {
     let actor = player(g, b"Builder", 12345);
     let di = descriptor(g, actor, ConState::Oedit);
     let mut olc = OlcData::new(); olc.obj = Some(Box::new(mud_world::model::ObjProto::default()));
-    olc.obj.as_mut().unwrap().type_flag = flags::ITEM_DRINKCON;
-    olc.mode = oedit::OEDIT_VALUE_3;
-    let olc = oedit::oedit_parse(g, di, olc, b"-2147483648").unwrap();
-    assert_eq!(olc.obj.as_ref().unwrap().values[2], 0);
+    for kind in [flags::ITEM_DRINKCON, flags::ITEM_FOUNTAIN] {
+        olc.obj.as_mut().unwrap().type_flag = kind;
+        for input in [i32::MIN, -1, 0].into_iter().chain(1..=16).chain([17, i32::MAX]) {
+            olc.mode = oedit::OEDIT_VALUE_3;
+            olc = oedit::oedit_parse(g, di, olc, input.to_string().as_bytes()).unwrap();
+            let expected = if input <= 1 { 0 } else if input > 16 { 15 } else { input - 1 };
+            assert_eq!(olc.obj.as_ref().unwrap().values[2], expected);
+            assert_eq!(olc.mode, oedit::OEDIT_VALUE_4);
+            g.descriptors.get_mut(di).unwrap().output.clear();
+        }
+    }
 }
 #[test]
 fn rejected_furniture_capacity_stays_on_the_same_prompt() {
@@ -67,8 +74,17 @@ fn rejected_furniture_capacity_stays_on_the_same_prompt() {
     let mut olc = OlcData::new(); olc.obj = Some(Box::new(mud_world::model::ObjProto::default()));
     olc.obj.as_mut().unwrap().type_flag = flags::ITEM_FURNITURE;
     olc.obj.as_mut().unwrap().values[0] = 2;
-    olc.mode = oedit::OEDIT_VALUE_1;
-    let olc = oedit::oedit_parse(g, di, olc, b"-1").unwrap();
-    assert_eq!(olc.mode, oedit::OEDIT_VALUE_1);
-    assert_eq!(olc.obj.as_ref().unwrap().values[0], 2);
+    for input in [i32::MIN, -1, 11, i32::MAX] {
+        olc.mode = oedit::OEDIT_VALUE_1;
+        olc = oedit::oedit_parse(g, di, olc, input.to_string().as_bytes()).unwrap();
+        assert_eq!(olc.mode, oedit::OEDIT_VALUE_1);
+        assert_eq!(olc.obj.as_ref().unwrap().values[0], 2);
+    }
+    for input in 0..=10 {
+        olc.mode = oedit::OEDIT_VALUE_1;
+        olc = oedit::oedit_parse(g, di, olc, input.to_string().as_bytes()).unwrap();
+        assert_ne!(olc.mode, oedit::OEDIT_VALUE_1);
+        assert_eq!(olc.obj.as_ref().unwrap().values[0], input);
+        g.descriptors.get_mut(di).unwrap().output.clear();
+    }
 }
