@@ -82,7 +82,7 @@ fn perform_put(g: &mut Game, chid: CharId, oid: ObjId, cont: ObjId) {
     // Corpses (val0 == 0) refuse puts: the val0 gate applies to them, and
     // any corpse outweighs a capacity of 0.
     let gated = cont_v0 > 0 || crate::handler::is_corpse(g, cont);
-    if gated && obj_weight(g, cont) + obj_weight(g, oid) > cont_v0 {
+    if gated && i64::from(obj_weight(g, cont)) + i64::from(obj_weight(g, oid)) > i64::from(cont_v0) {
         comm::act_full(g, b"$p won't fit in $P.", false, Some(chid), Some(oid), comm::ActArg::Obj(cont), comm::TO_CHAR);
     } else if g.obj(oid).obj_flagged(flags::ITEM_NODROP) && g.obj(cont).in_room != NOWHERE {
         act(g, b"You can't get $p out of your hand.", false, Some(chid), Some(oid), None, comm::TO_CHAR);
@@ -231,7 +231,7 @@ fn contains_after(g: &Game, cont: ObjId, o: ObjId) -> Vec<ObjId> {
 pub fn can_get_obj(g: &Game, chid: CharId, oid: ObjId) -> bool {
     let ch = g.ch(chid);
     g.obj(oid).can_wear(flags::ITEM_WEAR_TAKE)
-        && ch.carry_weight + crate::handler::obj_weight(g, oid) <= crate::handler::can_carry_w(ch)
+        && i64::from(ch.carry_weight) + i64::from(crate::handler::obj_weight(g, oid)) <= i64::from(crate::handler::can_carry_w(ch))
         && (ch.carry_items as i32) + 1 <= crate::handler::can_carry_n(ch)
         && crate::handler::can_see_obj(g, chid, oid)
 }
@@ -246,7 +246,7 @@ fn can_take_obj(g: &mut Game, chid: CharId, oid: ObjId) -> bool {
         if (ch.carry_items as i32) >= can_carry_n(ch) {
             act(g, b"$p: you can't carry that many items.", false, Some(chid), Some(oid), None, comm::TO_CHAR);
             return false;
-        } else if ch.carry_weight + obj_weight(g, oid) > can_carry_w(ch) {
+        } else if i64::from(ch.carry_weight) + i64::from(obj_weight(g, oid)) > i64::from(can_carry_w(ch)) {
             act(g, b"$p: you can't carry that much weight.", false, Some(chid), Some(oid), None, comm::TO_CHAR);
             return false;
         }
@@ -809,7 +809,7 @@ fn perform_give(g: &mut Game, chid: CharId, vict: CharId, oid: ObjId) {
         act(g, b"$N seems to have $S hands full.", false, Some(chid), None, Some(vict), comm::TO_CHAR);
         return;
     }
-    if obj_weight(g, oid) + g.ch(vict).carry_weight > can_carry_w(g.ch(vict)) && ch_lvl < LVL_IMMORT && vict_lvl < LVL_IMMORT {
+    if i64::from(obj_weight(g, oid)) + i64::from(g.ch(vict).carry_weight) > i64::from(can_carry_w(g.ch(vict))) && ch_lvl < LVL_IMMORT && vict_lvl < LVL_IMMORT {
         act(g, b"$E can't carry that much weight.", false, Some(chid), None, Some(vict), comm::TO_CHAR);
         return;
     }
