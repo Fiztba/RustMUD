@@ -174,11 +174,9 @@ pub fn do_mjunk(g: &mut Game, chid: CharId, argument: &[u8]) {
         mob_log(g, chid, "mjunk called with no argument");
         return;
     }
-    let junk_all = eq_ci(&arg, b"all");
-    // find_all_dots reduces "all.x" to "x"; `stripped` is that view.
     let (dotmode, stripped) = crate::act::item::find_all_dots(&arg);
-    if dotmode != crate::act::item::FIND_INDIV && !junk_all {
-        // "all.x": junk ONE matching item — worn first, then inventory.
+    if dotmode == crate::act::item::FIND_INDIV {
+        // A single named item: prefer equipment, then inventory.
         if let Some(pos) = get_obj_pos_in_equip_vis(g, chid, &stripped, None) {
             if let Some(o) = unequip_char(g, chid, pos) {
                 crate::handler::extract_obj(g, o);
@@ -190,23 +188,14 @@ pub fn do_mjunk(g: &mut Game, chid: CharId, argument: &[u8]) {
             crate::handler::extract_obj(g, o);
         }
     } else {
-        // "all" or a plain name: sweep inventory on arg[3]/arg+4 — a very
-        // literal check, so a short name junks everything — then the worn
-        // set by full keyword.
+        let all = dotmode == crate::act::item::FIND_ALL;
         let carrying = g.ch(chid).carrying.clone();
-        for o in carrying {
-            if g.try_obj(o).is_none() {
-                continue;
-            }
-            let hit = arg.len() <= 3 || isname(&arg[4..], crate::handler::obj_name(g, o));
-            if hit {
+        let equipment = g.ch(chid).equipment;
+        for o in carrying.into_iter().chain(equipment.into_iter().flatten()) {
+            if g.try_obj(o).is_some()
+                && (all || isname(&stripped, crate::handler::obj_name(g, o)))
+            {
                 crate::handler::extract_obj(g, o);
-            }
-        }
-        while let Some(pos) = get_obj_pos_in_equip_vis(g, chid, &arg, None) {
-            match unequip_char(g, chid, pos) {
-                Some(o) => crate::handler::extract_obj(g, o),
-                None => break,
             }
         }
     }
