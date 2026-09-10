@@ -42,6 +42,8 @@ fn failed_index_install_keeps_the_previous_file() {
     mud_game::olc::genzon::create_world_index(g, 65534, "wld");
     assert_eq!(std::fs::read(&index).ok().as_deref(), Some(original.as_slice()));
     drop(lock);
+    mud_game::olc::genzon::create_world_index(g, 65534, "wld");
+    assert!(std::fs::read_to_string(&index).unwrap().contains("65534.wld"));
 }
 #[cfg(windows)]
 #[test]
@@ -53,6 +55,8 @@ fn failed_index_removal_keeps_both_world_indexes() {
     assert!(!mud_game::olc::genzon::remove_world_index(g, 123, "wld"));
     for name in ["index", "index.mini"] { assert_eq!(std::fs::read(dir.join(name)).ok().as_deref(), Some(b"123.wld\n$\n".as_slice())); }
     drop(lock);
+    assert!(mud_game::olc::genzon::remove_world_index(g, 123, "wld"));
+    for name in ["index", "index.mini"] { assert_eq!(std::fs::read(dir.join(name)).unwrap(), b"$\n"); }
 }
 #[cfg(windows)]
 #[test]
@@ -65,7 +69,28 @@ fn failed_trigger_install_keeps_the_previous_zone_file() {
     let lock = hold_source(&dir.join(format!("{}.new", g.world.zones[zone].number)));
     let mut olc = mud_game::olc::OlcData::new(); mud_game::olc::trigedit::trigedit_setup_existing(g, &mut olc, 0);
     olc.number = vnum as i32; olc.zone_num = zone as i32;
+    olc.trig.as_mut().unwrap().name = Some(b"updated trigger".to_vec());
     mud_game::olc::trigedit::trigedit_save(g, usize::MAX, &mut olc);
     assert_eq!(std::fs::read(&old).ok().as_deref(), Some(original.as_slice()));
     drop(lock);
+    mud_game::olc::trigedit::trigedit_save(g, usize::MAX, &mut olc);
+    assert!(std::fs::read_to_string(&old).unwrap().contains("updated trigger"));
+}
+
+#[test]
+fn index_replacement_preserves_order_and_removes_only_the_selected_entry() {
+    let mut f = fixture("normal"); let g = &mut f.game;
+    for kind in ["qst", "zon", "wld", "mob", "obj", "shp", "trg"] {
+        let dir = g.lib_dir.join("world").join(kind);
+        let original = format!("1.{kind}\n3.{kind}\n$\n");
+        for name in ["index", "index.mini"] { std::fs::write(dir.join(name), &original).unwrap(); }
+        mud_game::olc::genzon::create_world_index(g, 2, kind);
+        let expected = format!("1.{kind}\n2.{kind}\n3.{kind}\n$\n");
+        assert_eq!(std::fs::read_to_string(dir.join("index")).unwrap(), expected);
+        mud_game::olc::genzon::create_world_index(g, 2, kind);
+        assert_eq!(std::fs::read_to_string(dir.join("index")).unwrap(), expected);
+        assert!(mud_game::olc::genzon::remove_world_index(g, 1, kind));
+        assert_eq!(std::fs::read_to_string(dir.join("index")).unwrap(), format!("2.{kind}\n3.{kind}\n$\n"));
+        assert_eq!(std::fs::read_to_string(dir.join("index.mini")).unwrap(), format!("3.{kind}\n$\n"));
+    }
 }
