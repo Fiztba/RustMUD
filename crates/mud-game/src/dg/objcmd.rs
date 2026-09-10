@@ -185,13 +185,22 @@ fn do_otransform(g: &mut Game, oid: ObjId, argument: &[u8], _subcmd: i32) {
         obj_log(g, oid, "otransform: bad argument");
         return;
     }
-    let o_rnum = g.world.real_object(atoi32(&arg) as Idx);
+    let o_rnum = std::str::from_utf8(&arg).ok().and_then(|s| s.parse::<Idx>().ok())
+        .filter(|&vnum| vnum != NOTHING).and_then(|vnum| g.world.real_object(vnum));
     let o = o_rnum.and_then(|r| crate::db::read_object(g, r));
     let Some(o) = o else {
         obj_log(g, oid, "otransform: bad object vnum");
         return;
     };
 
+    let old_rnum = g.obj(oid).item_number;
+    let new_rnum = g.obj(o).item_number;
+    let proto = g.world.obj_protos[new_rnum as usize].clone();
+    if !crate::handler::update_prototype_weight(g, oid, &proto) {
+        extract_obj(g, o);
+        return;
+    }
+    let weight = g.obj(oid).weight;
     let (wearer, pos) = {
         let ob = g.obj(oid);
         (ob.worn_by, ob.worn_on)
@@ -202,7 +211,8 @@ fn do_otransform(g: &mut Game, oid: ObjId, argument: &[u8], _subcmd: i32) {
 
     // Copy the fresh instance over, preserving location + script identity.
     // NOTE: item_number is NOT restored — %self.vnum% reports the new vnum.
-    let new_body = g.obj(o).clone();
+    let mut new_body = g.obj(o).clone();
+    new_body.weight = weight;
     {
         let old = g.obj(oid);
         let keep_in_room = old.in_room;
@@ -211,6 +221,7 @@ fn do_otransform(g: &mut Game, oid: ObjId, argument: &[u8], _subcmd: i32) {
         let keep_worn_on = old.worn_on;
         let keep_in_obj = old.in_obj;
         let keep_contains = old.contains.clone();
+        let keep_sat_in_by = old.sat_in_by;
         let keep_script_id = old.script_id;
         let keep_proto_script = old.proto_script.clone();
         let keep_script = old.script.clone();
@@ -223,11 +234,16 @@ fn do_otransform(g: &mut Game, oid: ObjId, argument: &[u8], _subcmd: i32) {
         ob.worn_on = keep_worn_on;
         ob.in_obj = keep_in_obj;
         ob.contains = keep_contains;
+        ob.sat_in_by = keep_sat_in_by;
         ob.script_id = keep_script_id;
         ob.proto_script = keep_proto_script;
         ob.script = keep_script;
     }
 
+    if old_rnum != new_rnum {
+        if old_rnum != NOTHING { g.obj_counts[old_rnum as usize] -= 1; }
+        g.obj_counts[new_rnum as usize] += 1;
+    }
     if let Some(w) = wearer {
         equip_char(g, w, oid, pos as usize);
     }
