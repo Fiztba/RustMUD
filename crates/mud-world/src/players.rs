@@ -94,6 +94,8 @@ pub struct PlayerFile {
     pub questpoints: i32,
     pub quest_counter: i32,
     pub current_quest: i32,
+    /// Remaining mud hours; absent in legacy player files.
+    pub quest_time: Option<i32>,
     pub completed_quests: Vec<u16>, // Qest:
     pub triggers: Vec<u16>,         // Trig: lines
     pub skills: Vec<(i32, i32)>,    // Skil: pairs
@@ -192,6 +194,7 @@ impl Default for PlayerFile {
             questpoints: 0,
             quest_counter: 0,
             current_quest: NOTHING,
+            quest_time: None,
             completed_quests: Vec::new(),
             triggers: Vec::new(),
             skills: Vec::new(),
@@ -631,6 +634,7 @@ pub fn load_char(lib: &Path, name: &[u8]) -> Option<(PlayerFile, Vec<String>)> {
             b"Qstp" | b"Qpnt" => pf.questpoints = atoi(&line),
             b"Qcur" => pf.current_quest = atoi(&line),
             b"Qcnt" => pf.quest_counter = atoi(&line),
+            b"Qtim" => pf.quest_time = Some(atoi(&line)),
             b"Qest" => load_quests(&mut r, &mut pf),
 
             b"Room" => pf.load_room = atoi(&line),
@@ -887,6 +891,9 @@ pub fn save_char(pf: &PlayerFile) -> Vec<u8> {
     }
     if pf.current_quest != NOTHING {
         put_int(&mut out, b"Qcur", pf.current_quest.into());
+    }
+    if let Some(time) = pf.quest_time {
+        put_int(&mut out, b"Qtim", time.into());
     }
 
     // One Trig: line per attached trigger, written whenever any exist --
@@ -1256,6 +1263,7 @@ mod tests {
             questpoints: 7,
             quest_counter: 4,
             current_quest: 1102,
+            quest_time: Some(3),
             completed_quests: vec![3000, 3001],
             triggers: vec![100, 200],
             skills: vec![(131, 75), (141, 40)],
