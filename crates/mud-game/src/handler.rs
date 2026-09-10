@@ -431,12 +431,30 @@ fn mark_object_changed(g: &mut Game, mut oid: ObjId) {
 
 /// Change weight in place without moving the item or firing acquisition quests.
 pub fn change_object_weight(g: &mut Game, oid: ObjId, delta: i32) {
-    g.obj_mut(oid).weight += delta;
-    if let Some(carrier) = g.obj(oid).carried_by {
-        g.ch_mut(carrier).carry_weight += delta;
-    } else if let Some(container) = g.obj(oid).in_obj {
-        adjust_contained_weight(g, container, delta);
-    }
+    let mut updates = Vec::new();
+    let mut current = oid;
+    let carrier = loop {
+        let Some(weight) = g.obj(current).weight.checked_add(delta) else {
+            g.log("SYSERR: Object weight change exceeds the supported range.".to_string());
+            return;
+        };
+        updates.push((current, weight));
+        if let Some(parent) = g.obj(current).in_obj {
+            if !weight_gate_open(g, parent) { break None; }
+            current = parent;
+        } else {
+            break g.obj(current).carried_by;
+        }
+    };
+    let carrier_update = if let Some(chid) = carrier {
+        let Some(weight) = g.ch(chid).carry_weight.checked_add(delta) else {
+            g.log("SYSERR: Carried weight change exceeds the supported range.".to_string());
+            return;
+        };
+        Some((chid, weight))
+    } else { None };
+    for (object, weight) in updates { g.obj_mut(object).weight = weight; }
+    if let Some((chid, weight)) = carrier_update { g.ch_mut(chid).carry_weight = weight; }
     mark_object_changed(g, oid);
 }
 

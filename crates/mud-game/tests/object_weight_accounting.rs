@@ -57,21 +57,23 @@ fn object(g: &mut Game, weight: i32, capacity: i32) -> mud_data::ids::ObjId {
 fn nested_weight_propagation_stops_at_every_unlimited_container() {
     let mut f = fixture("nested"); let g = &mut f.game;
     let ch = player(g, b"Carrier", 12345);
-    for outer_capacity in [0, 100] {
-        let outer = object(g, 2, outer_capacity); let inner = object(g, 3, 100); let item = object(g, 7, 0);
+    for corpse in [false, true] { for inner_capacity in [0, 100] { for outer_capacity in [0, 100] {
+        let outer = object(g, 2, outer_capacity); let inner = object(g, 3, inner_capacity); let item = object(g, 7, 0);
+        if corpse { g.obj_mut(outer).values[3] = 1; }
         mud_game::handler::obj_to_char(g, outer, ch);
         mud_game::handler::obj_to_obj(g, inner, outer);
         mud_game::handler::obj_to_obj(g, item, inner);
-        let expected = if outer_capacity > 0 { 12 } else { 2 };
-        assert_eq!(g.obj(inner).weight, 10);
+        let inner_weight = if inner_capacity > 0 { 10 } else { 3 };
+        let expected = if outer_capacity > 0 || corpse { 2 + inner_weight } else { 2 };
+        assert_eq!(g.obj(inner).weight, inner_weight);
         assert_eq!(g.obj(outer).weight, expected);
         assert_eq!(g.ch(ch).carry_weight, expected);
         mud_game::handler::obj_from_obj(g, item);
         assert_eq!(g.obj(inner).weight, 3);
-        assert_eq!(g.obj(outer).weight, if outer_capacity > 0 { 5 } else { 2 });
+        assert_eq!(g.obj(outer).weight, if outer_capacity > 0 || corpse { 5 } else { 2 });
         mud_game::handler::extract_obj(g, item); mud_game::handler::extract_obj(g, outer);
         assert_eq!(g.ch(ch).carry_weight, 0);
-    }
+    } } }
 }
 
 #[test]
@@ -106,4 +108,31 @@ fn script_weight_changes_update_carrier_accounting() {
     dg::add_trigger_at(g.ensure_script(go), trigger, -1);
     assert_eq!(dg::variables::var_subst(g, ctx, b"%self.weight(5)%"), b"12");
     assert_eq!(g.ch(ch).carry_weight, 12);
+    let other = object(g, 1, 0); mud_game::handler::obj_to_char(g, other, ch);
+    assert_eq!(dg::variables::var_subst(g, ctx, b"%self.weight(2147483647)%"), b"12");
+    assert_eq!(g.ch(ch).carry_weight, 13);
+    assert_eq!(dg::variables::var_subst(g, ctx, b"%self.weight(-2147483648)%"), b"1");
+    assert_eq!(g.ch(ch).carry_weight, 2);
+}
+
+#[test]
+fn in_place_changes_preserve_order_and_mark_nested_houses_and_worn_items_dirty() {
+    use mud_data::flags;
+    let mut f = fixture("dirty"); let g = &mut f.game;
+    let ch = player(g, b"Carrier", 12345);
+    let outer = object(g, 2, 0); let inner = object(g, 3, 100); let item = object(g, 7, 0);
+    g.world.rooms[0].room_flags[0] |= 1 << flags::ROOM_HOUSE;
+    mud_game::handler::obj_to_room(g, outer, 0);
+    mud_game::handler::obj_to_obj(g, inner, outer); mud_game::handler::obj_to_obj(g, item, inner);
+    g.world.rooms[0].room_flags[0] &= !(1 << flags::ROOM_HOUSE_CRASH);
+    mud_game::act::item::weight_change_object(g, item, -2);
+    assert_eq!(g.obj(item).weight, 5); assert_eq!(g.obj(inner).weight, 8); assert_eq!(g.obj(outer).weight, 2);
+    assert_ne!(g.world.rooms[0].room_flags[0] & (1 << flags::ROOM_HOUSE_CRASH), 0);
+    assert_eq!(g.obj(inner).contains, vec![item]);
+    mud_game::handler::obj_from_room(g, outer);
+    mud_game::handler::equip_char(g, ch, outer, WEAR_HOLD);
+    g.ch_mut(ch).act.remove(flags::PLR_CRASH);
+    mud_game::act::item::weight_change_object(g, outer, 4);
+    assert_eq!(g.obj(outer).weight, 6); assert_eq!(g.obj(outer).worn_by, Some(ch));
+    assert_eq!(g.ch(ch).carry_weight, 0); assert!(g.ch(ch).plr(flags::PLR_CRASH));
 }
