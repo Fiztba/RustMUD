@@ -69,38 +69,16 @@ fn one_phrase(arg: &[u8]) -> (BStr, &[u8]) {
 
 /// is_substring: word-boundary substring.
 pub fn is_substring(sub: &[u8], string: &[u8]) -> bool {
-    // Reimplement with position info (str_str returns bool in our port).
     if sub.is_empty() {
         return false;
     }
-    let lower = |b: u8| b.to_ascii_lowercase();
-    let mut i = 0;
-    // Naive scanner: find the FIRST str_str hit only.
-    let mut found: Option<usize> = None;
-    'outer: while i < string.len() {
-        while i < string.len() && lower(string[i]) != lower(sub[0]) {
-            i += 1;
-        }
-        let s = i;
-        let mut t = 0;
-        while t < sub.len() && i < string.len() && lower(string[i]) == lower(sub[t]) {
-            t += 1;
-            i += 1;
-        }
-        if t == sub.len() {
-            found = Some(s);
-            break 'outer;
-        }
-        if i >= string.len() {
-            break;
-        }
-    }
-    let Some(s) = found else { return false };
     let boundary = |b: u8| b.is_ascii_whitespace() || b.is_ascii_punctuation();
-    let front_ok = s == 0 || boundary(string[s - 1]);
-    let end = s + sub.len();
-    let end_ok = end == string.len() || boundary(string[end]);
-    front_ok && end_ok
+    string.windows(sub.len()).enumerate().any(|(start, window)| {
+        let end = start + sub.len();
+        window.eq_ignore_ascii_case(sub)
+            && (start == 0 || boundary(string[start - 1]))
+            && (end == string.len() || boundary(string[end]))
+    })
 }
 
 pub fn word_check(str_: &[u8], wordlist: &[u8]) -> bool {
@@ -1900,9 +1878,8 @@ mod tests {
         assert!(is_substring(b"hello", b"hello"));
         assert!(is_substring(b"hello", b"say 'hello'"));
         assert!(!is_substring(b"ell", b"well hello"));
-        // Only the FIRST str_str hit is found: "he" inside "the" fails the
-        // boundary check and the later standalone "he" is never seen.
-        assert!(!is_substring(b"he", b"the he"));
+        // A failed boundary check must allow a later standalone word.
+        assert!(is_substring(b"he", b"the he"));
         assert!(word_check(b"give me bread", b"bread water"));
         assert!(word_check(b"anything", b"*"));
         assert!(word_check(b"the magic word", b"\"magic word\""));

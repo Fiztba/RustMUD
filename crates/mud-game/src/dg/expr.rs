@@ -68,9 +68,7 @@ pub fn eval_op(op: &[u8], lhs: &[u8], rhs: &[u8]) -> BStr {
             if c_is_number(lhs) && c_is_number(rhs) {
                 s((num(lhs) >= num(rhs)) as i32)
             } else {
-                // A quirk kept deliberately: string >= computes
-                // Case-insensitive, less-or-equal.
-                s((cmp_ci(lhs, rhs) <= 0) as i32)
+                s((cmp_ci(lhs, rhs) >= 0) as i32)
             }
         }
         b"<" => {
@@ -258,7 +256,7 @@ mod tests {
     fn ops() {
         assert_eq!(eval_op(b"==", b" 4 ", b"4"), b"1");
         assert_eq!(eval_op(b"==", b"abc", b"ABC"), b"1");
-        assert_eq!(eval_op(b">=", b"b", b"a"), b"0"); // string >= is <= (bug)
+        assert_eq!(eval_op(b">=", b"b", b"a"), b"1");
         assert_eq!(eval_op(b"<=", b"a", b"b"), b"1");
         assert_eq!(eval_op(b"/=", b"yes", b"ye"), b"1");
         assert_eq!(eval_op(b"/=", b"yes", b""), b"0");

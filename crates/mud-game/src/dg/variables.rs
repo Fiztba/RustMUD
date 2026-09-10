@@ -1,5 +1,5 @@
 //! Variable substitution, including the tmpvr chained-access buffer
-//! surgery, the persistent subfield accumulator, and the '\x1'
+//! surgery, per-expansion field arguments, and the '\x1'
 //! unknown-field sentinel flow.
 
 use mud_data::ids::{CharId, ObjId};
@@ -25,22 +25,7 @@ pub fn str_str(cs: &[u8], ct: &[u8]) -> bool {
     if ct.is_empty() {
         return false;
     }
-    let lower = |b: u8| b.to_ascii_lowercase();
-    let mut i = 0;
-    while i < cs.len() {
-        while i < cs.len() && lower(cs[i]) != lower(ct[0]) {
-            i += 1;
-        }
-        let mut t = 0;
-        while t < ct.len() && i < cs.len() && lower(cs[i]) == lower(ct[t]) {
-            t += 1;
-            i += 1;
-        }
-        if t == ct.len() {
-            return true;
-        }
-    }
-    false
+    cs.windows(ct.len()).any(|window| window.eq_ignore_ascii_case(ct))
 }
 
 /// is_number: optional '-', then all digits, non-empty.
@@ -1589,7 +1574,7 @@ fn dir_by_name(field: &[u8]) -> Option<usize> {
 }
 
 /// The substitution walk over one line, including the in-place `tmpvr`
-/// overwrite and the subfield accumulator that persists across variables.
+/// overwrite and isolated arguments for each variable expansion.
 pub fn var_subst(g: &mut Game, ctx: DgCtx, line: &[u8]) -> BStr {
     // The buffers here grow, so nothing needs the bound -- but a
     // line this long cannot be processed at all downstream, and a builder
@@ -1633,10 +1618,8 @@ pub fn var_subst(g: &mut Game, ctx: DgCtx, line: &[u8]) -> BStr {
         v
     };
 
-    // subfield: one buffer and a running pointer, NEVER reset between
-    // %groups%.
+    // Reuse the allocation, but isolate arguments between fields.
     let mut subfield = vec![0u8; 4096];
-    let mut subfield_p = 0usize;
     let sub_cstr = |s: &Vec<u8>| -> BStr {
         s.iter().take_while(|&&b| b != 0).copied().collect()
     };
@@ -1667,6 +1650,8 @@ pub fn var_subst(g: &mut Game, ctx: DgCtx, line: &[u8]) -> BStr {
             continue; // let the loop condition re-check and end the scan
         }
 
+        let mut subfield_p = 0usize;
+        subfield[0] = 0;
         let var_start = p;
         while at(&tmp, p) != 0 && at(&tmp, p) != b'%' && at(&tmp, p) != b'.' {
             p += 1;
@@ -1687,8 +1672,10 @@ pub fn var_subst(g: &mut Game, ctx: DgCtx, line: &[u8]) -> BStr {
                     subfield[subfield_p] = 0;
                     let var_s = read_cstr(&tmp, var_start);
                     let field_s = read_cstr(&tmp, field_start);
-                    let sub_s = sub_cstr(&subfield);
+                    let sub_s = var_subst(g, ctx, &sub_cstr(&subfield));
                     let repl = find_replacement(g, ctx, &var_s, &field_s, &sub_s);
+                    subfield_p = 0;
+                    subfield[0] = 0;
                     if !repl.is_empty() {
                         let mut eval_line = b"eval tmpvr ".to_vec();
                         eval_line.extend_from_slice(&repl);
@@ -1766,12 +1753,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn str_str_is_naive() {
+    fn str_str_finds_overlapping_matches() {
         assert!(str_str(b"hello world", b"WORLD"));
         assert!(!str_str(b"hello", b""));
-        // The naive scan misses overlapping matches: "aab" IS in "aaab",
-        // but str_str does not find it.
-        assert!(!str_str(b"aaab", b"aab"));
+        // A failed prefix must not skip a later overlapping match.
+        assert!(str_str(b"aaab", b"aab"));
         assert!(str_str(b"aab", b"ab"));
     }
 
