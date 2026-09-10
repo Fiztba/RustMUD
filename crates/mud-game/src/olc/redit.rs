@@ -1112,8 +1112,8 @@ pub fn redit_parse(
         REDIT_DELETE => {
             match arg.first().copied() {
                 Some(b'y') | Some(b'Y') => {
-                    let vnum = olc.room.as_ref().unwrap().vnum;
-                    let rnum = g.world.real_room(vnum).unwrap_or(NOWHERE);
+                    // A copied room supplies content, never the deletion target.
+                    let rnum = g.real_room(olc.number).unwrap_or(NOWHERE);
                     if delete_room(g, rnum) {
                         write_to_desc(g, di, b"Room deleted.\r\n");
                         // Same toggle the save path honours.

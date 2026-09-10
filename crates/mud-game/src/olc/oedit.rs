@@ -1356,7 +1356,8 @@ pub fn oedit_parse(
         OEDIT_DELETE => {
             match arg.first().copied() {
                 Some(b'y') | Some(b'Y') => {
-                    let rnum = olc.obj_rnum;
+                    // Copy and concurrent table edits can change the scratch rnum.
+                    let rnum = g.world.real_object(olc.number as Idx).unwrap_or(NOTHING);
                     if delete_object(g, rnum).is_some() {
                         write_to_desc(g, di, b"Object deleted.\r\n");
                         // Same toggle the save path honours.
