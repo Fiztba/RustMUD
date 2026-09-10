@@ -1088,6 +1088,29 @@ mod tests {
     }
 
     #[test]
+    fn history_recall_prefers_newest_and_preserves_misses() {
+        for count in 0..=HISTORY_SIZE + 1 {
+            let mut d = desc();
+            for i in 0..count {
+                d.feed_input_test(format!("say message{i}\r\n").as_bytes()).unwrap();
+            }
+            let history = d.history.clone();
+            let pos = d.history_pos;
+            d.input.clear();
+            d.feed_input_test(b"!absent\r\n").unwrap();
+            assert_eq!(d.input.pop_front().unwrap().0, b"!absent");
+            assert_eq!(d.history, history);
+            assert_eq!(d.history_pos, pos);
+            d.feed_input_test(b"!say\r\n").unwrap();
+            let expected = if count == 0 { b"!say".to_vec() }
+                else { format!("say message{}", count - 1).into_bytes() };
+            assert_eq!(d.input.pop_front().unwrap().0, expected);
+            assert_eq!(d.history, history);
+            assert_eq!(d.history_pos, pos);
+        }
+    }
+
+    #[test]
     fn caret_substitution() {
         let mut d = desc();
         d.feed_input_test(b"say hello world\r\n^hello^goodbye\r\n").unwrap();
