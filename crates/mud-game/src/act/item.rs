@@ -1777,11 +1777,16 @@ fn perform_remove(g: &mut Game, chid: CharId, pos: usize) {
         if crate::dg::triggers::remove_otrigger(g, obj, chid) == 0 {
             return;
         }
-        if g.try_obj(obj).is_none() {
+        if g.try_obj(obj).is_none()
+            || !g.try_ch(chid).is_some_and(|ch| ch.equipment[pos] == Some(obj))
+        {
             return;
         }
         if let Some(o) = handler::unequip_char(g, chid, pos) {
             obj_to_char(g, o, chid);
+        }
+        if !g.try_obj(obj).is_some_and(|o| o.carried_by == Some(chid)) {
+            return;
         }
         act(g, b"You stop using $p.", false, Some(chid), Some(obj), None, comm::TO_CHAR);
         act(g, b"$n stops using $p.", true, Some(chid), Some(obj), None, comm::TO_ROOM);
