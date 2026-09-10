@@ -176,7 +176,7 @@ fn append_within(dst: &mut Vec<u8>, src: &[u8], size: usize) {
 
 /// Read a leading integer: optional whitespace, optional sign, then digits.
 /// Stops at the first non-digit and never reports an error. Overflow
-/// saturates at 64-bit range and is then truncated to 32 bits.
+/// saturates at the 32-bit return type limits.
 pub(crate) fn parse_int_prefix(s: &[u8]) -> i32 {
     let mut p = 0;
     while p < s.len() && is_ws(s[p]) {
@@ -198,7 +198,7 @@ pub(crate) fn parse_int_prefix(s: &[u8]) -> i32 {
     if neg {
         val = -val;
     }
-    val.clamp(i64::MIN as i128, i64::MAX as i128) as i64 as i32
+    val.clamp(i32::MIN as i128, i32::MAX as i128) as i32
 }
 
 /// Read one decimal integer at `*p`: leading whitespace, optional sign, and
@@ -232,7 +232,7 @@ fn scan_int(s: &[u8], p: &mut usize) -> Option<i32> {
         val = -val;
     }
     *p = q;
-    Some(val.clamp(i64::MIN as i128, i64::MAX as i128) as i64 as i32)
+    Some(val.clamp(i32::MIN as i128, i32::MAX as i128) as i32)
 }
 
 /// Parse `" <low> - <high> "`. Returns (count, low, high), where count is
@@ -1411,6 +1411,43 @@ mod tests {
 
     fn buf(eb: &EditBuf) -> &[u8] {
         eb.buf.as_deref().expect("buffer should exist")
+    }
+
+    #[test]
+    fn oversized_line_numbers_do_not_wrap_into_real_lines() {
+        for operation in ['e', 'i', 'd'] {
+            for number in ["4294967297", "-4294967295", "18446744073709551617"] {
+                let mut eb = three_lines(); let original = buf(&eb).to_vec();
+                let command = format!("/{operation} {number} changed");
+                add(&mut eb, command.as_bytes());
+                assert_eq!(buf(&eb), original, "command={command}");
+            }
+        }
+    }
+
+    #[test]
+    fn decimal_parsers_saturate_without_changing_valid_prefixes() {
+        for (text, expected) in [
+            ("0", 0), (" +12tail", 12), ("-12tail", -12),
+            ("2147483647", i32::MAX), ("2147483648", i32::MAX),
+            ("-2147483648", i32::MIN), ("-2147483649", i32::MIN),
+            ("4294967297", i32::MAX), ("-4294967295", i32::MIN),
+            ("9223372036854775807", i32::MAX), ("-9223372036854775808", i32::MIN),
+        ] {
+            assert_eq!(parse_int_prefix(text.as_bytes()), expected);
+            let mut pos = 0; assert_eq!(scan_int(text.as_bytes(), &mut pos), Some(expected));
+            assert!(pos > 0);
+        }
+        for sign in ["", "-"] {
+            let text = format!("{sign}{}", "9".repeat(500));
+            let expected = if sign.is_empty() { i32::MAX } else { i32::MIN };
+            assert_eq!(parse_int_prefix(text.as_bytes()), expected);
+            let mut pos = 0; assert_eq!(scan_int(text.as_bytes(), &mut pos), Some(expected));
+            assert_eq!(pos, text.len());
+        }
+        assert_eq!(parse_int_prefix(b"word"), 0);
+        let mut pos = 0; assert_eq!(scan_int(b"word", &mut pos), None); assert_eq!(pos, 0);
+        assert_eq!(parse_range(b"4294967297-4294967298"), (2, i32::MAX, i32::MAX));
     }
 
     // -- exported helpers ---------------------------------------------------
