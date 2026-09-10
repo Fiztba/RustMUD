@@ -493,6 +493,12 @@ pub fn mag_masses(g: &mut Game, _level: i32, chid: CharId, _spellnum: i32, _save
 
 /// mag_areas — earthquake, using the saving category of the casting source.
 pub fn mag_areas(g: &mut Game, level: i32, chid: CharId, spellnum: i32, savetype: i32) {
+    let Some(caster) = g.try_ch(chid) else { return };
+    let room = caster.in_room;
+    if room == NOWHERE || g.rooms.get(room as usize).is_none() { return; }
+    let present = |g: &Game, id| g.try_ch(id).is_some_and(|ch|
+        ch.in_room == room && !ch.plr(flags::PLR_NOTDEADYET) && !ch.mob_flagged(flags::MOB_NOTDEADYET));
+    if !present(g, chid) { return; }
     let mut to_char: Option<&[u8]> = None;
     let mut to_room: Option<&[u8]> = None;
 
@@ -508,10 +514,11 @@ pub fn mag_areas(g: &mut Game, level: i32, chid: CharId, spellnum: i32, savetype
         act(g, tr, false, Some(chid), None, None, comm::TO_ROOM);
     }
 
-    let room = g.ch(chid).in_room;
+    if !present(g, chid) { return; }
     let people = g.rooms[room as usize].people.clone();
     for tch in people {
-        if tch == chid {
+        if !present(g, chid) { break; }
+        if tch == chid || !present(g, tch) {
             continue;
         }
         let Some(t) = g.try_ch(tch) else { continue };
@@ -535,7 +542,7 @@ pub fn mag_areas(g: &mut Game, level: i32, chid: CharId, spellnum: i32, savetype
         if spellnum == SPELL_EARTHQUAKE && t.aff(flags::AFF_FLYING) {
             continue;
         }
-        // Doesn't matter if they die here so we don't check. -gg 6/24/98
+        // A damage callback can also move or extract the caster or later targets.
         mag_damage(g, level, chid, Some(tch), spellnum, savetype);
     }
 }
