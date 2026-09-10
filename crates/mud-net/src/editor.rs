@@ -176,7 +176,7 @@ fn append_within(dst: &mut Vec<u8>, src: &[u8], size: usize) {
 
 /// Read a leading integer: optional whitespace, optional sign, then digits.
 /// Stops at the first non-digit and never reports an error. Overflow
-/// saturates at 64-bit range and is then truncated to 32 bits.
+/// saturates at the 32-bit return type limits.
 pub(crate) fn parse_int_prefix(s: &[u8]) -> i32 {
     let mut p = 0;
     while p < s.len() && is_ws(s[p]) {
@@ -198,7 +198,7 @@ pub(crate) fn parse_int_prefix(s: &[u8]) -> i32 {
     if neg {
         val = -val;
     }
-    val.clamp(i64::MIN as i128, i64::MAX as i128) as i64 as i32
+    val.clamp(i32::MIN as i128, i32::MAX as i128) as i32
 }
 
 /// Read one decimal integer at `*p`: leading whitespace, optional sign, and
@@ -232,7 +232,7 @@ fn scan_int(s: &[u8], p: &mut usize) -> Option<i32> {
         val = -val;
     }
     *p = q;
-    Some(val.clamp(i64::MIN as i128, i64::MAX as i128) as i64 as i32)
+    Some(val.clamp(i32::MIN as i128, i32::MAX as i128) as i32)
 }
 
 /// Parse `" <low> - <high> "`. Returns (count, low, high), where count is
@@ -1654,6 +1654,18 @@ mod tests {
         let (_, m, _) = add(&mut eb, b"/d 4");
         assert_eq!(m, vec![b"0 lines deleted.\r\n".to_vec()]);
         assert_eq!(buf(&eb), b"one\r\ntwo\r\nthree\r\n");
+    }
+
+    #[test]
+    fn oversized_line_numbers_do_not_wrap_into_real_lines() {
+        for operation in ['e', 'i', 'd'] {
+            for number in ["4294967297", "-4294967295", "18446744073709551617"] {
+                let mut eb = three_lines(); let original = buf(&eb).to_vec();
+                let command = format!("/{operation} {number} changed");
+                add(&mut eb, command.as_bytes());
+                assert_eq!(buf(&eb), original, "command={command}");
+            }
+        }
     }
 
     // -- /e and /i -----------------------------------------------------------
