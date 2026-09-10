@@ -59,9 +59,14 @@ fn large_container_and_item_weights_are_compared_without_overflow() {
     let chest = g.objs.insert(chest); obj_to_room(g, chest, 0);
     let mut obj = mud_game::obj::create_obj(); obj.name = Some(b"gem".to_vec()); obj.weight = 1;
     let item = g.objs.insert(obj); obj_to_char(g, item, actor);
-    mud_game::act::item::do_put(g, actor, b"gem chest", 0, 0);
-    assert_eq!(g.obj(item).carried_by, Some(actor));
-    assert!(g.obj(chest).contains.is_empty());
+    for (weight, capacity, fits) in [(i32::MAX, i32::MAX, false), (9, 10, true), (10, 10, false), (0, 1, true)] {
+        g.obj_mut(chest).weight = weight; g.obj_mut(chest).values[0] = capacity;
+        mud_game::act::item::do_put(g, actor, b"gem chest", 0, 0);
+        assert_eq!(g.obj(item).in_obj == Some(chest), fits);
+        if fits { obj_from_obj(g, item); obj_to_char(g, item, actor); }
+        assert_eq!(g.obj(item).carried_by, Some(actor));
+        assert!(g.obj(chest).contains.is_empty());
+    }
 }
 #[test]
 fn an_unrepresentable_carry_total_is_not_takeable() {
@@ -70,6 +75,13 @@ fn an_unrepresentable_carry_total_is_not_takeable() {
     let mut obj = mud_game::obj::create_obj(); obj.name = Some(b"heavy".to_vec()); obj.weight = i32::MAX;
     obj.wear_flags.set(flags::ITEM_WEAR_TAKE);
     let item = g.objs.insert(obj); obj_to_room(g, item, 0);
-    g.ch_mut(actor).carry_weight = 1;
-    assert!(!mud_game::act::item::can_get_obj(g, actor, item));
+    g.ch_mut(actor).aff_abils.str_ = 10;
+    let capacity = can_carry_w(g.ch(actor));
+    for carried in [0, 1, capacity, i32::MAX] {
+        for weight in [0, 1, capacity, i32::MAX] {
+            g.ch_mut(actor).carry_weight = carried; g.obj_mut(item).weight = weight;
+            assert_eq!(mud_game::act::item::can_get_obj(g, actor, item),
+                i64::from(carried) + i64::from(weight) <= i64::from(capacity));
+        }
+    }
 }
