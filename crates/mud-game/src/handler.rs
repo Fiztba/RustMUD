@@ -571,7 +571,7 @@ fn innate_affects(g: &Game, chid: CharId) -> FlagSet {
 }
 
 /// affect_modify_ar.
-fn affect_modify_ar(g: &mut Game, chid: CharId, loc: i32, mod_: i32, bitv: FlagSet, add: bool) {
+pub(crate) fn affect_modify_ar(g: &mut Game, chid: CharId, loc: i32, mod_: i32, bitv: FlagSet, add: bool) {
     let mut mod_ = mod_;
     if add {
         for bit in 0..128 {
