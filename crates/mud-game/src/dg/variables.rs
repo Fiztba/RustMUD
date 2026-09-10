@@ -1580,8 +1580,8 @@ fn room_field(g: &mut Game, ctx: DgCtx, r: RoomRnum, field: &[u8], subfield: &[u
 }
 
 fn dir_by_name(field: &[u8]) -> Option<usize> {
-    for (i, d) in [&b"north"[..], b"east", b"south", b"west", b"up", b"down"].iter().enumerate() {
-        if eq_ci(field, d) {
+    for (i, d) in tables::DIRS.iter().enumerate() {
+        if eq_ci(field, d.as_bytes()) {
             return Some(i);
         }
     }
