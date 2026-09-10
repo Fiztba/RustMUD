@@ -53,10 +53,12 @@ fn social_rename_rejects_existing_commands() {
     let mut f = fixture("collision"); let g = &mut f.game;
     let actor = player(g, b"Admin", 12345); let di = descriptor(g, actor, ConState::Aedit);
     let original = g.socials[0].command.clone();
-    let mut olc = OlcData::new(); olc.zone_num = 0; olc.action = Some(Box::new(g.socials[0].clone()));
-    olc.mode = AEDIT_ACTION_NAME;
-    let olc = aedit_parse(g, di, olc, b"look").unwrap();
-    assert_eq!(olc.action.unwrap().command, original);
+    for name in [b"look".to_vec(), b"LOOK".to_vec(), g.socials[1].command.clone()] {
+        let mut olc = OlcData::new(); olc.zone_num = 0; olc.action = Some(Box::new(g.socials[0].clone()));
+        olc.mode = AEDIT_ACTION_NAME;
+        let olc = aedit_parse(g, di, olc, &name).unwrap();
+        assert_eq!(olc.action.unwrap().command, original);
+    }
 }
 #[test]
 fn social_identifiers_reject_tabs() {
@@ -68,5 +70,21 @@ fn social_identifiers_reject_tabs() {
         let olc = aedit_parse(g, di, olc, b"broken\tname").unwrap();
         let action = olc.action.unwrap();
         assert_eq!((action.command, action.sort_as), (original.command, original.sort_as));
+    }
+}
+
+#[test]
+fn own_name_and_unused_names_remain_editable() {
+    let mut f = fixture("valid"); let g = &mut f.game;
+    let actor = player(g, b"Admin", 12345); let di = descriptor(g, actor, ConState::Aedit);
+    for name in [g.socials[0].command.clone(), b"reviewwave".to_vec()] {
+        let mut olc = OlcData::new(); olc.zone_num = 0; olc.action = Some(Box::new(g.socials[0].clone()));
+        olc.mode = AEDIT_ACTION_NAME;
+        let mut olc = aedit_parse(g, di, olc, &name).unwrap();
+        assert_eq!(olc.action.as_ref().unwrap().command, name);
+        assert_eq!(olc.mode, AEDIT_MAIN_MENU);
+        olc.mode = AEDIT_SORT_AS;
+        let olc = aedit_parse(g, di, olc, b"revieww").unwrap();
+        assert_eq!(olc.action.as_ref().unwrap().sort_as, b"revieww");
     }
 }
