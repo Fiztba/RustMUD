@@ -201,7 +201,8 @@ fn room_contents_after(g: &Game, room: RoomRnum, o: ObjId) -> Vec<ObjId> {
 }
 
 fn contains_after(g: &Game, cont: ObjId, o: ObjId) -> Vec<ObjId> {
-    let contains = &g.obj(cont).contains;
+    let Some(container) = g.try_obj(cont) else { return Vec::new() };
+    let contains = &container.contains;
     match contains.iter().position(|&x| x == o) {
         Some(idx) => contains[idx + 1..].to_vec(),
         None => Vec::new(),
@@ -268,6 +269,10 @@ fn perform_get_from_container(g: &mut Game, chid: CharId, oid: ObjId, cont: ObjI
             }
             obj_from_obj(g, oid);
             obj_to_char(g, oid, chid);
+            if g.try_obj(cont).is_none() || !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) {
+                get_check_money(g, chid, oid);
+                return;
+            }
             comm::act_full(g, b"You get $p from $P.", false, Some(chid), Some(oid), comm::ActArg::Obj(cont), comm::TO_CHAR);
             comm::act_full(g, b"$n gets $p from $P.", true, Some(chid), Some(oid), comm::ActArg::Obj(cont), comm::TO_ROOM);
             get_check_money(g, chid, oid);
@@ -333,12 +338,15 @@ fn get_from_container(g: &mut Game, chid: CharId, cont: ObjId, arg: &[u8], mode:
 }
 
 fn perform_get_from_room(g: &mut Game, chid: CharId, oid: ObjId) -> bool {
+    let room = g.ch(chid).in_room;
+    if !g.try_obj(oid).is_some_and(|o| o.in_room == room) { return false; }
     if can_take_obj(g, chid, oid) && crate::dg::triggers::get_otrigger(g, oid, chid) != 0 {
-        if g.try_obj(oid).is_none() {
+        if !g.try_obj(oid).is_some_and(|o| o.in_room == room) || g.ch(chid).in_room != room {
             return false;
         }
         obj_from_room(g, oid);
         obj_to_char(g, oid, chid);
+        if !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) { return true; }
         act(g, b"You get $p.", false, Some(chid), Some(oid), None, comm::TO_CHAR);
         act(g, b"$n gets $p.", true, Some(chid), Some(oid), None, comm::TO_ROOM);
         get_check_money(g, chid, oid);

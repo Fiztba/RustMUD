@@ -103,3 +103,42 @@ fn drop_survives_act_listener_removing_the_item() { transfer_case(b"drops", b"ge
 fn put_survives_act_listener_removing_the_item() { transfer_case(b"puts", b"gem chest", false); }
 #[test]
 fn put_survives_act_listener_removing_the_container() { transfer_case(b"puts", b"gem chest", true); }
+
+#[test]
+fn get_does_not_reclaim_an_item_moved_by_its_get_trigger() {
+    let mut f = fixture("get-moved"); let g = &mut f.game;
+    let actor = player(g, b"Actor", 12345); g.ch_mut(actor).level = LVL_IMPL;
+    char_to_room(g, actor, 0); g.rooms[0].light = 1;
+    descriptor(g, actor, ConState::Playing);
+    let oid = item(g, b"gem"); obj_to_room(g, oid, 0);
+    let nr = g.world.triggers.len() as u16;
+    g.world.triggers.push(mud_world::model::Trigger {
+        vnum: 65000, attach_type: dg::OBJ_TRIGGER, trigger_type: dg::OTRIG_GET,
+        narg: 100, cmdlist: vec![format!("omove {}", g.world.rooms[1].vnum).into_bytes(), b"return 1".to_vec()],
+        ..Default::default()
+    });
+    let trigger = dg::read_trigger(g, nr).unwrap();
+    dg::add_trigger_at(g.ensure_script(GoId::Obj(oid)), trigger, -1);
+    mud_game::act::item::do_get(g, actor, b"gem", 0, 0);
+    assert_eq!(g.obj(oid).in_room, 1);
+    assert_eq!(g.obj(oid).carried_by, None);
+    assert_eq!(g.ch(actor).carry_items, 0);
+}
+
+#[test]
+fn bulk_put_stops_using_a_removed_container() {
+    let mut f = fixture("bulk-put"); let g = &mut f.game;
+    let actor = player(g, b"Actor", 12345); g.ch_mut(actor).level = LVL_IMPL;
+    char_to_room(g, actor, 0); g.rooms[0].light = 1;
+    descriptor(g, actor, ConState::Playing);
+    listener(g, b"puts", &[b"mpurge chest"]);
+    let chest = item(g, b"chest");
+    g.obj_mut(chest).type_flag = mud_data::flags::ITEM_CONTAINER;
+    g.obj_mut(chest).values[0] = 1000; obj_to_room(g, chest, 0);
+    let first = item(g, b"gem"); obj_to_char(g, first, actor);
+    let second = item(g, b"gem"); obj_to_char(g, second, actor);
+    mud_game::act::item::do_put(g, actor, b"all.gem chest", 0, 0);
+    assert!(g.try_obj(chest).is_none());
+    assert_eq!(g.ch(actor).carry_items, 1);
+    assert_eq!(g.ch(actor).carrying.len(), 1);
+}
