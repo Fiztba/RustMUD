@@ -46,15 +46,19 @@ pub fn copy_quest(from: &Quest) -> Quest {
 /// add_quest. Returns the quest's rnum.
 ///
 /// `func` is the scratch copy's `QST_FUNC` — what `qedit_setup_existing`
-/// carried out of the table, or None for a new quest.
-pub fn add_quest(g: &mut Game, nqst: &Quest, func: Option<MobSpec>) -> usize {
+/// carried out of the table, or None for a new quest. Runtime assignment
+/// is derived from the current NPC instead of this potentially stale copy.
+pub fn add_quest(g: &mut Game, nqst: &Quest, _func: Option<MobSpec>) -> usize {
     let rznum = crate::dg::mobcmd::real_zone_by_thing(g, nqst.vnum as i32);
 
+    let old_master = real_quest(g, nqst.vnum as i32).map(|r| g.world.quests[r].qm_vnum);
+    let old_secondary = old_master.and_then(|qm| crate::quest::questmaster_secondary(g, qm));
+    let secondary = crate::quest::questmaster_secondary(g, nqst.qm_vnum);
     let rnum = match real_quest(g, nqst.vnum as i32) {
         // The quest already exists, just update it.
         Some(rnum) => {
             g.world.quests[rnum] = copy_quest(nqst);
-            g.quest_secondary[rnum] = func;
+            g.quest_secondary[rnum] = secondary;
             rnum
         }
         None => {
@@ -62,7 +66,7 @@ pub fn add_quest(g: &mut Game, nqst: &Quest, func: Option<MobSpec>) -> usize {
             // shifting rows up until the row below holds a smaller vnum.
             // Bubbling the new row down does the same rearranging.
             g.world.quests.push(copy_quest(nqst));
-            g.quest_secondary.push(func);
+            g.quest_secondary.push(secondary);
             let mut rnum = g.world.quests.len() - 1;
             while rnum > 0 && nqst.vnum <= g.world.quests[rnum - 1].vnum {
                 g.world.quests.swap(rnum, rnum - 1);
@@ -73,15 +77,10 @@ pub fn add_quest(g: &mut Game, nqst: &Quest, func: Option<MobSpec>) -> usize {
         }
     };
 
-    // Make sure we assign spec procs to the questmaster.
-    let qm = g.world.quests[rnum].qm_vnum;
-    if let Some(qmrnum) = qm_rnum(g, qm) {
-        match g.mob_specs[qmrnum] {
-            Some(spec) if spec != MobSpec::QuestMaster => g.quest_secondary[rnum] = Some(spec),
-            _ => {}
-        }
-        g.mob_specs[qmrnum] = Some(MobSpec::QuestMaster);
+    if let Some(old) = old_master.filter(|&qm| qm != nqst.qm_vnum) {
+        crate::quest::update_questmaster_spec(g, old, old_secondary);
     }
+    crate::quest::update_questmaster_spec(g, nqst.qm_vnum, secondary);
 
     // And make sure we save the updated quest information to disk.
     match rznum {
@@ -98,15 +97,6 @@ pub fn add_quest(g: &mut Game, nqst: &Quest, func: Option<MobSpec>) -> usize {
     }
 
     rnum
-}
-
-/// real_mobile over a questmaster vnum, which is `NOBODY` when unset and
-/// can hold a raw -1 from the editor's "-1 for none" prompts.
-fn qm_rnum(g: &Game, qm: i32) -> Option<usize> {
-    if !(0..=u16::MAX as i32).contains(&qm) {
-        return None;
-    }
-    g.world.real_mobile(qm as Idx).map(|r| r as usize)
 }
 
 pub fn delete_quest(g: &mut Game, rnum: usize) -> bool {
@@ -127,7 +117,7 @@ pub fn delete_quest(g: &mut Game, rnum: usize) -> bool {
     g.log(format!("GenOLC: delete_quest: Deleting quest #{} ({}).", vnum, name));
 
     // Make a note of the quest master's secondary spec proc.
-    let tempfunc = g.quest_secondary[rnum];
+    let tempfunc = crate::quest::questmaster_secondary(g, qm);
 
     g.world.quests.remove(rnum);
     g.quest_secondary.remove(rnum);
@@ -145,18 +135,7 @@ pub fn delete_quest(g: &mut Game, rnum: usize) -> bool {
         ),
     }
 
-    // Does the questmaster mob have any quests left?
-    if qm != NOBODY as i32 {
-        let remaining = g.world.quests.iter().filter(|q| q.qm_vnum == qm).count();
-        if remaining == 0 {
-            // `qm` is a VNUM. Using it as an index would land on whichever
-            // mob happens to have that rnum, or past the table entirely,
-            // and the questmaster would keep the proc forever.
-            if let Some(qmrnum) = qm_rnum(g, qm) {
-                g.mob_specs[qmrnum] = tempfunc;
-            }
-        }
-    }
+    crate::quest::update_questmaster_spec(g, qm, tempfunc);
     true
 }
 

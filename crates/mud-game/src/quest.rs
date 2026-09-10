@@ -114,21 +114,43 @@ pub fn assign_the_quests(g: &mut Game) {
             ));
             continue;
         }
-        let Some(mrnum) = g.world.real_mobile(qm as Idx) else {
+        let Some(_) = g.world.real_mobile(qm as Idx) else {
             g.log(format!(
                 "SYSERR: Quest #{} has an invalid questmaster.",
                 g.world.quests[rnum].vnum
             ));
             continue;
         };
-        let existing = g.mob_specs[mrnum as usize];
-        if let Some(spec) = existing {
-            if spec != crate::spec::MobSpec::QuestMaster {
-                g.quest_secondary[rnum] = Some(spec);
-            }
-        }
-        g.mob_specs[mrnum as usize] = Some(crate::spec::MobSpec::QuestMaster);
+        let secondary = questmaster_secondary(g, qm);
+        update_questmaster_spec(g, qm, secondary);
     }
+}
+
+/// The displaced procedure belongs to the NPC, regardless of quest order.
+pub(crate) fn questmaster_secondary(g: &Game, qm: i32) -> Option<crate::spec::MobSpec> {
+    use crate::spec::MobSpec;
+    let vnum = Idx::try_from(qm).ok().filter(|&n| n != NOBODY)?;
+    let mrnum = g.world.real_mobile(vnum)?;
+    match g.mob_specs[mrnum as usize] {
+        Some(MobSpec::QuestMaster) => g.world.quests.iter().enumerate()
+            .filter(|(_, q)| q.qm_vnum == qm)
+            .find_map(|(i, _)| g.quest_secondary[i].filter(|&s| s != MobSpec::QuestMaster)),
+        other => other,
+    }
+}
+
+pub(crate) fn update_questmaster_spec(g: &mut Game, qm: i32, secondary: Option<crate::spec::MobSpec>) {
+    let Ok(vnum) = Idx::try_from(qm) else { return };
+    if vnum == NOBODY { return; }
+    let Some(mrnum) = g.world.real_mobile(vnum) else { return };
+    let mut remaining = false;
+    for (i, quest) in g.world.quests.iter().enumerate() {
+        if quest.qm_vnum == qm {
+            g.quest_secondary[i] = secondary;
+            remaining = true;
+        }
+    }
+    g.mob_specs[mrnum as usize] = if remaining { Some(crate::spec::MobSpec::QuestMaster) } else { secondary };
 }
 
 // ----------------------------------------------------- completion machinery
