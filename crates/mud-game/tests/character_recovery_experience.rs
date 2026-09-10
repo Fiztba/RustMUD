@@ -70,7 +70,9 @@ fn combat_happy_hour_bonus_is_applied_once() {
     mud_game::handler::char_to_room(g, ch, 0); g.rooms[0].light = 1;
     g.world.rooms[0].room_flags[0] &= !(1 << mud_data::flags::ROOM_PEACEFUL);
     g.happy.ticks_left = 10; g.happy.exp_rate = 100;
-    for grouped in [false, true] {
+    for ticks in [0, 10] { for rate in [0, 25, 100, i32::MAX] { for cap in [200, 1000] { for grouped in [false, true] {
+        g.happy.ticks_left = ticks; g.happy.exp_rate = rate; g.config.max_exp_gain = cap;
+        g.groups.clear(); g.ch_mut(ch).group = None;
         g.ch_mut(ch).points.exp = 0;
         if grouped {
             g.groups.push(mud_game::game::Group { id: 99, leader: Some(ch), members: vec![ch], group_flags: 0 });
@@ -81,9 +83,11 @@ fn combat_happy_hour_bonus_is_applied_once() {
         { let v = g.ch_mut(victim); v.level = 10; v.position = POS_STANDING; v.points.hit = -11; v.points.exp = 900; v.act.remove(mud_data::flags::MOB_NOKILL); }
         g.descriptors.get_mut(di).unwrap().output.clear();
         mud_game::fight::damage(g, ch, victim, 0, mud_data::spells::TYPE_SUFFERING);
-        assert_eq!(g.ch(ch).points.exp, 600, "grouped={grouped}");
-        assert!(String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output).contains("600"));
-    }
+        let base = i64::from(cap.min(300));
+        let expected = (if ticks > 0 { base + base * i64::from(rate) / 100 } else { base }).min(i64::from(cap)) as i32;
+        assert_eq!(g.ch(ch).points.exp, expected, "grouped={grouped}, rate={rate}, ticks={ticks}, cap={cap}");
+        assert!(String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output).contains(&expected.to_string()));
+    } } } }
 }
 
 #[test]
@@ -100,4 +104,10 @@ fn demotion_rebuilds_stats_and_advance_ignores_happy_hour() {
     mud_game::act::wizard::do_advance(g, admin, b"Student 15", 0, 0);
     assert_eq!(g.ch(victim).level, 15);
     assert_eq!(g.ch(victim).points.exp, mud_data::tables::level_exp(CLASS_WARRIOR as i32, 15));
+    mud_game::act::wizard::do_advance(g, admin, b"Student 5", 0, 0);
+    assert_eq!(g.ch(victim).level, 5);
+    assert_eq!(g.ch(victim).points.exp, mud_data::tables::level_exp(CLASS_WARRIOR as i32, 5));
+    mud_game::act::wizard::do_advance(g, admin, b"Student 1", 0, 0);
+    assert_eq!(g.ch(victim).level, 1);
+    assert_eq!(g.ch(victim).points.exp, mud_data::tables::level_exp(CLASS_WARRIOR as i32, 1));
 }
