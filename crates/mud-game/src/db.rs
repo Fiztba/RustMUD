@@ -231,6 +231,8 @@ pub fn reset_zone(g: &mut Game, zr: usize) {
 
     let cmd_count = g.world.zones[zr].cmds.len();
     for cmd_no in 0..cmd_count {
+        // Load and wear triggers can extract the object between reset commands.
+        tobj = tobj.filter(|&id| g.try_obj(id).is_some());
         let cmd = g.world.zones[zr].cmds[cmd_no].clone();
         if cmd.command == b'S' {
             break;
@@ -276,21 +278,18 @@ pub fn reset_zone(g: &mut Game, zr: usize) {
             }
             b'P' => {
                 if g.obj_counts[cmd.arg1 as usize] < cmd.arg2 {
-                    let id = read_object(g, cmd.arg1 as Idx).expect("renum guarantees obj rnum");
                     let container = g
                         .object_list
                         .iter()
                         .copied()
                         .find(|o| g.objs.get(*o).map(|ob| ob.item_number) == Some(cmd.arg3 as Idx));
                     let Some(cid) = container else {
-                        // The error path breaks BEFORE the tmob clear, so
-                        // the freshly read object stays in limbo on
-                        // object_list.
                         log_zone_error(g, zr, cmd_no, "target obj not found, command disabled");
                         g.world.zones[zr].cmds[cmd_no].command = b'*';
                         last_cmd = 0;
                         continue;
                     };
+                    let id = read_object(g, cmd.arg1 as Idx).expect("renum guarantees obj rnum");
                     obj_to_obj(g, id, cid);
                     last_cmd = 1;
                     crate::dg::triggers::load_otrigger(g, id);
