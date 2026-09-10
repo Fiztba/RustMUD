@@ -267,11 +267,14 @@ pub fn do_steal(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcm
                 send_to_char(g, chid, b"Impossible!\r\n");
                 return;
             }
-            if g.try_obj(eqo).is_none() {
+            if !g.try_ch(vict).is_some_and(|v| v.equipment[eq_pos] == Some(eqo)) {
                 return;
             }
             act(g, b"You unequip $p and steal it.", false, Some(chid), Some(eqo), None, comm::TO_CHAR);
             act(g, b"$n steals $p from $N.", false, Some(chid), Some(eqo), Some(vict), comm::TO_NOTVICT);
+            if !g.try_ch(vict).is_some_and(|v| v.equipment[eq_pos] == Some(eqo)) {
+                return;
+            }
             if let Some(o) = crate::handler::unequip_char(g, vict, eq_pos) {
                 crate::handler::obj_to_char(g, o, chid);
             }
