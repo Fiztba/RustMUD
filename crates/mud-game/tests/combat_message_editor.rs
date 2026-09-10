@@ -95,3 +95,33 @@ fn new_message_sets_remain_counted_and_save_on_quit() {
     assert_eq!(g.fight_messages[slot].number_of_attacks, 1);
     assert_eq!(g.fight_messages[slot].msg.len(), 1);
 }
+
+#[test]
+fn failed_message_save_or_delete_stays_open_and_can_retry() {
+    use mud_game::olc::{OlcData, msgedit::*};
+    for mode in [MSGEDIT_CONFIRM_SAVE, MSGEDIT_CONFIRM_DELETE] {
+        let mut f = fixture(&format!("write-failure-{mode}")); let g = &mut f.game;
+        let ch = player(g, b"Builder", 12345); let di = descriptor(g, ch, ConState::Msgedit);
+        let slot = g.fight_messages.iter().position(|s| !s.msg.is_empty()).unwrap();
+        let original_type = g.fight_messages[slot].a_type;
+        let original_count = g.fight_messages[slot].msg.len();
+        let mut olc = OlcData::new(); olc.number = slot as i32; olc.mode = mode;
+        olc.value = 1; olc.msg_quit = true;
+        olc.msg_list = Some(Box::new(g.fight_messages[slot].clone()));
+        olc.msg_list.as_mut().unwrap().a_type = 480;
+        let path = g.lib_dir.join("misc/messages"); let backup = g.lib_dir.join("misc/messages.original");
+        std::fs::rename(&path, &backup).unwrap(); std::fs::create_dir(&path).unwrap();
+        let olc = msgedit_parse(g, di, olc, b"y").expect("failed writes must retain the editor for retry");
+        assert_eq!(g.fight_messages[slot].a_type, original_type);
+        assert_eq!(g.fight_messages[slot].msg.len(), original_count);
+        let output = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
+        assert!(!output.contains("Messages saved.") && !output.contains("Attack type deleted."));
+        std::fs::remove_dir(&path).unwrap(); std::fs::rename(&backup, &path).unwrap();
+        assert!(msgedit_parse(g, di, olc, b"y").is_none());
+        let loaded = mud_game::fight::load_messages(&g.lib_dir).unwrap();
+        if mode == MSGEDIT_CONFIRM_SAVE {
+            assert_eq!(g.fight_messages[slot].a_type, 480);
+            assert!(loaded.iter().any(|s| s.a_type == 480));
+        } else { assert!(g.fight_messages[slot].msg.is_empty()); }
+    }
+}
