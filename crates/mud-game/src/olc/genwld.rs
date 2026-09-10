@@ -347,6 +347,33 @@ pub fn delete_room(g: &mut Game, rnum: RoomRnum) -> bool {
         );
     }
 
+    // Open editors hold independent copies of these runtime room indices.
+    for olc in g.olc.values_mut() {
+        if let Some(room) = olc.room.as_mut() {
+            for exit in room.dir_option.iter_mut().flatten() {
+                if exit.to_room == rnum {
+                    exit.to_room = NOWHERE;
+                } else if exit.to_room != NOWHERE && exit.to_room > rnum {
+                    exit.to_room -= 1;
+                }
+            }
+        }
+        if let Some(zone) = olc.zone.as_mut() {
+            for cmd in &mut zone.cmds {
+                let room = match cmd.command {
+                    b'M' | b'O' | b'T' | b'V' => &mut cmd.arg3,
+                    b'D' | b'R' => &mut cmd.arg1,
+                    _ => continue,
+                };
+                if *room == rnum as i32 {
+                    cmd.command = b'*';
+                } else if *room != NOWHERE as i32 && *room > rnum as i32 {
+                    *room -= 1;
+                }
+            }
+        }
+    }
+
     // Shop room lists hold vnums; a deleted room becomes the void.
     for shop in g.world.shops.iter_mut() {
         for room in shop.in_rooms.iter_mut() {
