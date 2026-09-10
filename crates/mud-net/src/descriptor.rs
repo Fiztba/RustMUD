@@ -979,6 +979,28 @@ mod tests {
     }
 
     #[test]
+    fn overlong_password_is_not_echoed_to_the_socket() {
+        use std::net::{TcpListener, TcpStream};
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        client.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        server.set_nonblocking(true).unwrap();
+        let mut d = Descriptor::new(Some(mio::net::TcpStream::from_std(server)), b"localhost", 1, 0, false);
+        d.echo_suppressed = true;
+        let mut password = vec![b's'; MAX_INPUT_LENGTH + 10];
+        password.push(b'\n');
+        d.feed_input_test(&password).unwrap();
+        assert_eq!(d.input.len(), 1);
+        assert!(d.last_input.is_empty());
+        assert!(d.snoop_input.is_empty());
+        let error = client.read(&mut [0; 1024]).unwrap_err();
+        assert!(matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut));
+    }
+
+    #[test]
     fn history_prefix_recall_echoes() {
         let mut d = desc();
         d.feed_input_test(b"cast armor\r\nlook\r\n!c\r\n").unwrap();
