@@ -3,7 +3,7 @@
 //! The one editor that writes no file: it takes a copy of a player's toggles,
 //! lets an immortal work on the copy, and on save writes them back to the
 //! live character and calls `save_char`. The victim is held as a `CharId`,
-//! so a quit mid-edit cannot leave a stale reference behind.
+//! which must be checked again when the editor receives input.
 //!
 //! Two shapes worth naming:
 //!
@@ -731,7 +731,12 @@ pub fn prefedit_parse(
     arg: &[u8],
 ) -> Option<Box<OlcData>> {
     let Some(ed) = g.descriptors.get(di).and_then(|d| d.character) else { return Some(olc) };
-    let vict_level = g.ch(olc.prefs.as_ref().unwrap().ch).level;
+    let Some(vict) = g.try_ch(olc.prefs.as_ref().unwrap().ch) else {
+        send_to_char(g, ed, b"That player has left. Preference editing cancelled.\r\n");
+        crate::olc::cleanup_olc(g, di, olc, CLEANUP_ALL);
+        return None;
+    };
+    let vict_level = vict.level;
 
     let invalid = |g: &mut Game, ed: CharId| {
         let mut m: BStr = cc(g, ed, C_NRM, KBRED).to_vec();
