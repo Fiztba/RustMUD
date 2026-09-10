@@ -294,39 +294,12 @@ pub fn delete_room(g: &mut Game, rnum: RoomRnum) -> bool {
     // Zone commands: cancel the ones that pointed here, shift the rest.
     // A zone whose commands change here has to be written back out or
     // its.zon keeps pointing at a room that no longer exists.
-    let nowhere = NOWHERE as i32;
     let mut unknown = 0;
     let mut touched: Vec<Idx> = Vec::new();
-    for zi in 0..g.world.zones.len() {
-        let n = g.world.zones[zi].cmds.len();
-        let mut zone_touched = false;
-        for ci in 0..n {
-            let cmd = &mut g.world.zones[zi].cmds[ci];
-            match cmd.command {
-                b'M' | b'O' | b'T' | b'V' => {
-                    if cmd.arg3 == rnum as i32 {
-                        cmd.command = b'*';
-                        zone_touched = true;
-                    } else if cmd.arg3 > rnum as i32 && cmd.arg3 != nowhere {
-                        cmd.arg3 -= 1;
-                        zone_touched = true;
-                    }
-                }
-                b'D' | b'R' => {
-                    if cmd.arg1 == rnum as i32 {
-                        cmd.command = b'*';
-                        zone_touched = true;
-                    } else if cmd.arg1 > rnum as i32 && cmd.arg1 != nowhere {
-                        cmd.arg1 -= 1;
-                        zone_touched = true;
-                    }
-                }
-                b'G' | b'P' | b'E' | b'*' | b'S' => {}
-                _ => unknown += 1,
-            }
-        }
-        if zone_touched {
-            touched.push(g.world.zones[zi].number);
+    for zone in &mut g.world.zones {
+        unknown += zone.cmds.iter().filter(|cmd| !b"MOTVDRGPE*S".contains(&cmd.command)).count();
+        if super::genzon::remove_room_resets(zone, rnum) {
+            touched.push(zone.number);
         }
     }
     for zvnum in touched {
@@ -353,18 +326,7 @@ pub fn delete_room(g: &mut Game, rnum: RoomRnum) -> bool {
             }
         }
         if let Some(zone) = olc.zone.as_mut() {
-            for cmd in &mut zone.cmds {
-                let room = match cmd.command {
-                    b'M' | b'O' | b'T' | b'V' => &mut cmd.arg3,
-                    b'D' | b'R' => &mut cmd.arg1,
-                    _ => continue,
-                };
-                if *room == rnum as i32 {
-                    cmd.command = b'*';
-                } else if *room != NOWHERE as i32 && *room > rnum as i32 {
-                    *room -= 1;
-                }
-            }
+            super::genzon::remove_room_resets(zone, rnum);
         }
     }
 

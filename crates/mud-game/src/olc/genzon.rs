@@ -383,6 +383,56 @@ pub fn remove_prototype_resets(zone: &mut Zone, rnum: Idx, mobile: bool) -> bool
     changed
 }
 
+/// Disable resets tied to a deleted room, including commands using their implicit
+/// targets. Keep positions stable for open zone editors and shift surviving rooms.
+pub fn remove_room_resets(zone: &mut Zone, rnum: Idx) -> bool {
+    let mut changed = false;
+    let (mut mob_removed, mut tmob_removed, mut tobj_removed) = (false, false, false);
+    let mut previous_removed = false;
+    for cmd in &mut zone.cmds {
+        let mut remove = cmd.if_flag != 0 && previous_removed;
+        let room = match cmd.command {
+            b'M' | b'O' | b'T' | b'V' => Some(&mut cmd.arg3),
+            b'D' | b'R' => Some(&mut cmd.arg1),
+            _ => None,
+        };
+        if let Some(room) = room {
+            remove |= *room == rnum as i32;
+            if *room > rnum as i32 && *room != NOWHERE as i32 {
+                *room -= 1;
+                changed = true;
+            }
+        }
+        match cmd.command {
+            b'M' => {
+                mob_removed = remove;
+                tmob_removed = remove;
+                tobj_removed = remove;
+            }
+            b'O' | b'P' | b'G' | b'E' => {
+                remove |= matches!(cmd.command, b'G' | b'E') && mob_removed;
+                tobj_removed = remove;
+                tmob_removed = remove;
+            }
+            b'T' | b'V' => {
+                remove |= (cmd.arg1 == crate::dg::MOB_TRIGGER && tmob_removed)
+                    || (cmd.arg1 == crate::dg::OBJ_TRIGGER && tobj_removed);
+            }
+            b'D' | b'R' => {
+                tmob_removed = remove;
+                tobj_removed = remove;
+            }
+            _ => {}
+        }
+        previous_removed = remove;
+        if remove {
+            cmd.command = b'*';
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// add_cmd_to_list.
 ///
 /// Copying into a fresh `count + 2` array with
