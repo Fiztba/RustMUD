@@ -712,10 +712,11 @@ fn perform_ttype(p: &mut ProtocolState, data: &[u8], output_empty: bool) {
     // stop-cycling flag inside that same branch, so an "ANSI" arriving as a
     // LATER response does not stop the cycle.
     let mut stop_cyclic = false;
-    if p.var_str(Var::CLIENT_ID) == b"Unknown" {
+    // Both comparisons are MatchString in C, so they ignore case.
+    if p.var_str(Var::CLIENT_ID).eq_ignore_ascii_case(b"Unknown") {
         p.vars[Var::CLIENT_ID as usize].value_string = Some(name.clone());
         // Cyclic TTYPE locks up Windows telnet (protocol.c:1717-1733).
-        if name == b"ANSI" {
+        if name.eq_ignore_ascii_case(b"ANSI") {
             stop_cyclic = true;
         }
     }
@@ -1043,7 +1044,9 @@ fn parse_atcp(p: &mut ProtocolState, data: &[u8], bugs: &mut BugLog, output_empt
 }
 
 fn find_var(name: &[u8]) -> Option<Var> {
-    VAR_TABLE.iter().position(|d| d.name == name).map(var_from_index)
+    // C looks names up with MatchString (a tolower loop), so "health" finds
+    // HEALTH.
+    VAR_TABLE.iter().position(|d| d.name.eq_ignore_ascii_case(name)).map(var_from_index)
 }
 
 fn send_msdp_list(p: &mut ProtocolState, name: &[u8], items: &[&[u8]], output_empty: bool) {
@@ -1083,7 +1086,12 @@ fn execute_msdp_pair(
     if var.is_empty() || val.is_empty() {
         return;
     }
-    match var {
+    // C matches the command word and the LIST/RESET argument with
+    // MatchString (case-insensitive). The original `val` is kept for the
+    // configurable-variable branch, whose string value must not be recased.
+    let var_upper = var.to_ascii_uppercase();
+    let val_upper = val.to_ascii_uppercase();
+    match var_upper.as_slice() {
         b"SEND" => {
             if let Some(v) = find_var(val) {
                 msdp_send_var(p, v, output_empty);
@@ -1102,14 +1110,14 @@ fn execute_msdp_pair(
             }
         }
         b"RESET" => {
-            if val == b"REPORTABLE_VARIABLES" || val == b"REPORTED_VARIABLES" {
+            if val_upper == b"REPORTABLE_VARIABLES" || val_upper == b"REPORTED_VARIABLES" {
                 for slot in &mut p.vars {
                     slot.report = false;
                     slot.dirty = false;
                 }
             }
         }
-        b"LIST" => match val {
+        b"LIST" => match val_upper.as_slice() {
             b"COMMANDS" => {
                 send_msdp_list(p, b"COMMANDS", &[b"LIST", b"REPORT", b"RESET", b"SEND", b"UNREPORT"], output_empty)
             }
@@ -1137,7 +1145,9 @@ fn execute_msdp_pair(
                         items.push(def.name);
                     }
                 }
-                send_msdp_list(p, val, &items, output_empty);
+                // C answers with its own literal name, so the reply is
+                // uppercase however the request was spelled.
+                send_msdp_list(p, &val_upper, &items, output_empty);
             }
             b"REPORTED_VARIABLES" => {
                 let names: Vec<&[u8]> =
@@ -1161,7 +1171,7 @@ fn execute_msdp_pair(
                 if !def.configurable {
                     return;
                 }
-                if def.write_once && p.var_str(v) != b"Unknown" {
+                if def.write_once && !p.var_str(v).eq_ignore_ascii_case(b"Unknown") {
                     return;
                 }
                 if def.is_string {
@@ -2136,5 +2146,111 @@ mod tests {
         let _ = protocol_input(&mut p, &sb, true);
         assert!(p.vars[Var::AFFECTS as usize].report, "first pair was lost");
         assert!(p.vars[Var::LEVEL as usize].report, "empty VAR did not reuse REPORT");
+    }
+
+    fn msdp_sb(var: &[u8], val: &[u8]) -> Vec<u8> {
+        let mut sb = vec![IAC, SB, TELOPT_MSDP, MSDP_VAR];
+        sb.extend_from_slice(var);
+        sb.push(MSDP_VAL);
+        sb.extend_from_slice(val);
+        sb.extend_from_slice(&[IAC, SE]);
+        sb
+    }
+
+    fn msdp_pair(name: &[u8], value: &[u8]) -> Vec<u8> {
+        let mut want = vec![IAC, SB, TELOPT_MSDP, MSDP_VAR];
+        want.extend_from_slice(name);
+        want.push(MSDP_VAL);
+        want.extend_from_slice(value);
+        want.extend_from_slice(&[IAC, SE]);
+        want
+    }
+
+    /// ExecuteMSDPPair matches the command word and every variable name with
+    /// MatchString, a tolower() loop, so "report"/"health" must behave exactly
+    /// like "REPORT"/"HEALTH".
+    #[test]
+    fn msdp_report_matches_command_and_variable_case_insensitively() {
+        for (var, val) in [(b"report" as &[u8], b"health" as &[u8]), (b"REPORT", b"health"), (b"Report", b"Health")] {
+            let mut p = ProtocolState::new();
+            let _ = protocol_input(&mut p, &[IAC, DO, TELOPT_MSDP], true);
+            let _ = protocol_input(&mut p, &msdp_sb(var, val), true);
+            assert!(
+                p.vars[Var::HEALTH as usize].report,
+                "{} {} did not register HEALTH",
+                String::from_utf8_lossy(var),
+                String::from_utf8_lossy(val)
+            );
+            let _ = protocol_input(&mut p, &msdp_sb(b"unreport", b"HEALTH"), true);
+            assert!(!p.vars[Var::HEALTH as usize].report, "lowercase UNREPORT was ignored");
+        }
+    }
+
+    #[test]
+    fn msdp_send_matches_case_insensitively_and_replies_in_table_case() {
+        for (var, val) in [(b"send" as &[u8], b"server_id" as &[u8]), (b"SEND", b"SERVER_ID")] {
+            let mut p = ProtocolState::new();
+            let _ = protocol_input(&mut p, &[IAC, DO, TELOPT_MSDP], true);
+            p.out.clear();
+            p.set_string(Var::SERVER_ID, MUD_NAME);
+            let _ = protocol_input(&mut p, &msdp_sb(var, val), true);
+            assert_eq!(
+                p.out,
+                msdp_pair(b"SERVER_ID", MUD_NAME),
+                "{} {}",
+                String::from_utf8_lossy(var),
+                String::from_utf8_lossy(val)
+            );
+        }
+    }
+
+    #[test]
+    fn msdp_list_and_reset_match_case_insensitively() {
+        let mut want = vec![IAC, SB, TELOPT_MSDP, MSDP_VAR];
+        want.extend_from_slice(b"COMMANDS");
+        want.push(MSDP_VAL);
+        want.push(MSDP_ARRAY_OPEN);
+        for item in [b"LIST" as &[u8], b"REPORT", b"RESET", b"SEND", b"UNREPORT"] {
+            want.push(MSDP_VAL);
+            want.extend_from_slice(item);
+        }
+        want.push(MSDP_ARRAY_CLOSE);
+        want.extend_from_slice(&[IAC, SE]);
+        for (var, val) in [(b"list" as &[u8], b"commands" as &[u8]), (b"LIST", b"COMMANDS")] {
+            let mut p = ProtocolState::new();
+            let _ = protocol_input(&mut p, &[IAC, DO, TELOPT_MSDP], true);
+            p.out.clear();
+            let _ = protocol_input(&mut p, &msdp_sb(var, val), true);
+            assert_eq!(p.out, want, "{} {}", String::from_utf8_lossy(var), String::from_utf8_lossy(val));
+        }
+
+        // A lowercase list name is answered with C's literal uppercase name.
+        let mut p = ProtocolState::new();
+        let _ = protocol_input(&mut p, &[IAC, DO, TELOPT_MSDP], true);
+        p.out.clear();
+        let _ = protocol_input(&mut p, &msdp_sb(b"list", b"reportable_variables"), true);
+        let mut head = vec![IAC, SB, TELOPT_MSDP, MSDP_VAR];
+        head.extend_from_slice(b"REPORTABLE_VARIABLES");
+        head.push(MSDP_VAL);
+        assert!(p.out.starts_with(&head), "list reply did not use the table-case name");
+
+        let _ = protocol_input(&mut p, &msdp_sb(b"REPORT", b"HEALTH"), true);
+        assert!(p.vars[Var::HEALTH as usize].report);
+        let _ = protocol_input(&mut p, &msdp_sb(b"reset", b"reported_variables"), true);
+        assert!(!p.vars[Var::HEALTH as usize].report, "lowercase RESET was ignored");
+    }
+
+    /// The TTYPE "ANSI" stop-cycling check is MatchString in C too.
+    #[test]
+    fn ttype_ansi_stops_the_cycle_regardless_of_case() {
+        for name in [b"ANSI" as &[u8], b"ansi"] {
+            let mut p = ProtocolState::new();
+            let mut sb = vec![IAC, SB, TELOPT_TTYPE, TELQUAL_IS];
+            sb.extend_from_slice(name);
+            sb.extend_from_slice(&[IAC, SE]);
+            p.out.clear();
+            let _ = protocol_input(&mut p, &sb, true);
+            assert!(p.out.is_empty(), "{} did not stop the TTYPE cycle", String::from_utf8_lossy(name));
+        }
     }
 }
