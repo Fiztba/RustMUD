@@ -1103,8 +1103,6 @@ pub fn oedit_parse(
                         olc.obj.as_mut().unwrap().values[0] = number;
                         oedit_disp_val2_menu(g, di, &mut olc);
                     }
-                    // Falls out of the switch and calls val2 again.
-                    oedit_disp_val2_menu(g, di, &mut olc);
                     return Some(olc);
                 }
                 flags::ITEM_WEAPON => {
@@ -1168,7 +1166,7 @@ pub fn oedit_parse(
                 flags::ITEM_WEAPON => (1, MAX_WEAPON_SDICE),
                 flags::ITEM_WAND | flags::ITEM_STAFF => (0, 20),
                 flags::ITEM_DRINKCON | flags::ITEM_FOUNTAIN => {
-                    number -= 1;
+                    number = number.saturating_sub(1);
                     (0, NUM_LIQ_TYPES - 1)
                 }
                 flags::ITEM_KEY => (0, 65099),
