@@ -1060,7 +1060,7 @@ pub fn medit_parse(
 
         // Numerical responses.
         MEDIT_SEX => {
-            olc.mob.as_mut().unwrap().sex = limit(i - 1, 0, NUM_GENDERS as i32 - 1);
+            olc.mob.as_mut().unwrap().sex = limit(i.saturating_sub(1), 0, NUM_GENDERS as i32 - 1);
         }
         MEDIT_HITROLL => return stat(g, di, olc, |m, i| m.hitroll = limit(i, 0, 50), i),
         MEDIT_DAMROLL => return stat(g, di, olc, |m, i| m.damroll = limit(i, 0, 50), i),
@@ -1089,10 +1089,10 @@ pub fn medit_parse(
         }
 
         MEDIT_POS => {
-            olc.mob.as_mut().unwrap().position = limit(i - 1, 0, NUM_POSITIONS as i32 - 1);
+            olc.mob.as_mut().unwrap().position = limit(i.saturating_sub(1), 0, NUM_POSITIONS as i32 - 1);
         }
         MEDIT_DEFAULT_POS => {
-            olc.mob.as_mut().unwrap().default_pos = limit(i - 1, 0, NUM_POSITIONS as i32 - 1);
+            olc.mob.as_mut().unwrap().default_pos = limit(i.saturating_sub(1), 0, NUM_POSITIONS as i32 - 1);
         }
         MEDIT_ATTACK => {
             olc.mob.as_mut().unwrap().bare_hand_attack =
