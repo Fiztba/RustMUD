@@ -1899,15 +1899,16 @@ fn obj_checkload(g: &mut Game, chid: CharId, ovnum: i32) {
     for zone in 0..g.world.zones.len() {
         let (mut lastroom_v, mut lastroom_r, mut lastmob_r) = (0i32, 0usize, 0usize);
         for zc in &g.world.zones[zone].cmds {
-            let room_name = |r: usize| g.world.rooms[r].name.clone().unwrap_or_default();
+            let room_name = |r: usize| g.world.rooms.get(r)
+                .map_or_else(|| b"Nowhere".to_vec(), |room| room.name.clone().unwrap_or_default());
             match zc.command {
                 b'M' => {
-                    lastroom_v = g.world.rooms[zc.arg3 as usize].vnum as i32;
+                    lastroom_v = g.world.rooms.get(zc.arg3 as usize).map_or(-1, |room| room.vnum as i32);
                     lastroom_r = zc.arg3 as usize;
                     lastmob_r = zc.arg1 as usize;
                 }
                 b'O' => {
-                    lastroom_v = g.world.rooms[zc.arg3 as usize].vnum as i32;
+                    lastroom_v = g.world.rooms.get(zc.arg3 as usize).map_or(-1, |room| room.vnum as i32);
                     lastroom_r = zc.arg3 as usize;
                     if zc.arg1 == ornum {
                         let mut r = format!("  [{:5}] ", lastroom_v).into_bytes();
@@ -1986,33 +1987,34 @@ fn trg_checkload(g: &mut Game, chid: CharId, tvnum: i32) {
     let mut found = false;
     let mut rows: Vec<BStr> = Vec::new();
     for zone in 0..g.world.zones.len() {
-        let (mut lastroom_v, mut lastroom_r) = (0i32, 0usize);
-        let (mut lastmob_r, mut lastobj_r) = (0usize, 0usize);
+        let mut lastroom_v = -1;
+        let (mut lastmob_r, mut lastobj_r) = (None, None);
         for zc in &g.world.zones[zone].cmds {
             match zc.command {
                 b'M' => {
-                    lastroom_v = g.world.rooms[zc.arg3 as usize].vnum as i32;
-                    lastroom_r = zc.arg3 as usize;
-                    lastmob_r = zc.arg1 as usize;
+                    lastroom_v = g.world.rooms.get(zc.arg3 as usize).map_or(-1, |room| room.vnum as i32);
+                    lastmob_r = Some(zc.arg1 as usize);
+                    lastobj_r = None;
                 }
                 b'O' => {
-                    lastroom_v = g.world.rooms[zc.arg3 as usize].vnum as i32;
-                    lastroom_r = zc.arg3 as usize;
-                    lastobj_r = zc.arg1 as usize;
+                    lastroom_v = g.world.rooms.get(zc.arg3 as usize).map_or(-1, |room| room.vnum as i32);
+                    lastobj_r = Some(zc.arg1 as usize);
+                    lastmob_r = None;
                 }
-                b'P' | b'G' | b'E' => lastobj_r = zc.arg1 as usize,
-                // No `break`, so 'R' falls through into 'T'.
-                b'R' | b'T' => {
-                    if zc.command == b'R' {
-                        lastroom_v = 0;
-                        lastroom_r = 0;
-                        lastobj_r = 0;
-                        lastmob_r = 0;
-                    }
+                b'P' | b'G' | b'E' => {
+                    lastobj_r = Some(zc.arg1 as usize);
+                    lastmob_r = None;
+                }
+                b'R' | b'D' => {
+                    lastobj_r = None;
+                    lastmob_r = None;
+                }
+                b'T' => {
                     if zc.arg2 != trnum_i {
                         continue;
                     }
                     if zc.arg1 == crate::dg::MOB_TRIGGER {
+                        let Some(lastmob_r) = lastmob_r.filter(|&r| r < g.world.mob_protos.len()) else { continue };
                         let mut r = format!("mob [{:5}] ", g.world.mob_protos[lastmob_r].vnum)
                             .into_bytes();
                         r.extend_from_slice(&crate::act::pad_right(
@@ -2023,6 +2025,7 @@ fn trg_checkload(g: &mut Game, chid: CharId, tvnum: i32) {
                         rows.push(r);
                         found = true;
                     } else if zc.arg1 == crate::dg::OBJ_TRIGGER {
+                        let Some(lastobj_r) = lastobj_r.filter(|&r| r < g.world.obj_protos.len()) else { continue };
                         let mut r = format!("obj [{:5}] ", g.world.obj_protos[lastobj_r].vnum)
                             .into_bytes();
                         r.extend_from_slice(&crate::act::pad_right(
@@ -2036,9 +2039,10 @@ fn trg_checkload(g: &mut Game, chid: CharId, tvnum: i32) {
                         rows.push(r);
                         found = true;
                     } else if zc.arg1 == crate::dg::WLD_TRIGGER {
-                        let mut r = format!("room [{:5}] ", lastroom_v).into_bytes();
+                        let Some(room) = g.world.rooms.get(zc.arg3 as usize) else { continue };
+                        let mut r = format!("room [{:5}] ", room.vnum).into_bytes();
                         r.extend_from_slice(&crate::act::pad_right(
-                            g.world.rooms[lastroom_r].name.as_deref().unwrap_or(b""),
+                            room.name.as_deref().unwrap_or(b""),
                             60,
                         ));
                         r.extend_from_slice(b" (zedit)\r\n");
