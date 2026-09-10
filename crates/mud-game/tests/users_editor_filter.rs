@@ -55,11 +55,14 @@ fn users_filters_treat_editors_as_playing_connections() {
     for ch in [admin, target] { mud_game::handler::char_to_room(g, ch, 0); }
     g.rooms[0].light = 1;
     let di = descriptor(g, admin, ConState::Playing); let td = descriptor(g, target, ConState::Oedit);
-    for (argument, expected) in [(b"-p".as_slice(), true), (b"-n Target".as_slice(), true), (b"-d".as_slice(), false)] {
+    for state in [ConState::Playing, ConState::Oedit, ConState::Redit, ConState::Zedit, ConState::Medit, ConState::Sedit, ConState::Tedit, ConState::Cedit, ConState::Aedit, ConState::Trigedit, ConState::Hedit, ConState::Qedit, ConState::Prefedit, ConState::Ibtedit, ConState::Msgedit] {
+        g.descriptors.get_mut(td).unwrap().state = state;
+    for (argument, expected) in [(b"-p".as_slice(), true), (b"-n Target".as_slice(), true), (b"-d".as_slice(), false), (b"-p -d".as_slice(), false), (b"-h localhost".as_slice(), true), (b"-n Missing".as_slice(), false)] {
         g.descriptors.get_mut(di).unwrap().output.clear();
         mud_game::act::informative::do_users(g, admin, argument, 0, 0);
         let output = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
         assert_eq!(output.contains("Target"), expected, "argument={argument:?}");
+    }
     }
     g.descriptors.get_mut(td).unwrap().state = ConState::Password;
     g.descriptors.get_mut(di).unwrap().output.clear();
