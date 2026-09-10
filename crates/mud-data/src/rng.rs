@@ -80,14 +80,15 @@ impl CircleRng {
     }
 
     /// Equivalent of `dice(num, size)`: sum of `num` rolls of 1..=size;
-    /// zero when either argument is non-positive.
+    /// zero when either argument is non-positive. Totals saturate at i32::MAX;
+    /// every roll is still consumed.
     pub fn dice(&mut self, num: i32, size: i32) -> i32 {
         if size <= 0 || num <= 0 {
             return 0;
         }
-        let mut sum = 0;
+        let mut sum = 0i32;
         for _ in 0..num {
-            sum += self.rand_number(1, size);
+            sum = sum.saturating_add(self.rand_number(1, size));
         }
         sum
     }
@@ -96,6 +97,18 @@ impl CircleRng {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_dice_totals_saturate_without_changing_draw_consumption() {
+        let mut rng = CircleRng::new(12345);
+        let mut reference = rng.clone();
+        let sum: i64 = (0..8).map(|_| i64::from(reference.rand_number(1, i32::MAX))).sum();
+        assert!(sum > i64::from(i32::MAX));
+        assert_eq!(rng.dice(8, i32::MAX), i32::MAX);
+        assert_eq!(rng.circle_random(), reference.circle_random());
+    }
+
+
 
     /// The first three raw draws from seed 1, pinned.
     #[test]
