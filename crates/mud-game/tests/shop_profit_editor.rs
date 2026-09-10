@@ -63,3 +63,20 @@ fn invalid_profit_multipliers_leave_shop_settings_unchanged() {
         }
     }
 }
+
+#[test]
+fn valid_profit_multipliers_preserve_the_other_field() {
+    let mut f = fixture("valid"); let g = &mut f.game;
+    let admin = player(g, b"Admin", 12345); let di = descriptor(g, admin, ConState::Sedit);
+    for mode in [SEDIT_BUY_PROFIT, SEDIT_SELL_PROFIT] {
+        for (input, value) in [(b"0".as_slice(), 0.0), (b"0.75", 0.75), (b"1.5", 1.5), (b"100", 100.0)] {
+            let mut olc = OlcData::new(); sedit_setup_existing(g, &mut olc, 0);
+            olc.shop.as_mut().unwrap().profit_buy = 2.0; olc.shop.as_mut().unwrap().profit_sell = 0.5;
+            olc.mode = mode;
+            let olc = sedit_parse(g, di, olc, input).unwrap();
+            let shop = olc.shop.as_ref().unwrap();
+            assert_eq!((shop.profit_buy, shop.profit_sell), if mode == SEDIT_BUY_PROFIT { (value, 0.5) } else { (2.0, value) });
+            assert_eq!(olc.mode, SEDIT_MAIN_MENU);
+        }
+    }
+}
