@@ -702,30 +702,42 @@ pub fn change_player_name(g: &mut Game, chid: CharId, vict: CharId, new_name: &[
         return false;
     }
 
+    // Move all persistent data before publishing the new identity. On failure,
+    // restore earlier moves so the player can still load under the old name.
+    let move_files = || -> std::io::Result<()> {
+        let mut moves = Vec::new();
+        for kind in [FileKind::Plr, FileKind::Objs, FileKind::Text, FileKind::Vars] {
+            let from = g.lib_dir.join(get_filename(kind, &old_name).unwrap());
+            let to = g.lib_dir.join(get_filename(kind, new_name).unwrap());
+            if to.try_exists()? {
+                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists,
+                    format!("destination already exists: {}", to.display())));
+            }
+            if from.try_exists()? { moves.push((from, to)); }
+        }
+        for (index, (from, to)) in moves.iter().enumerate() {
+            if let Err(error) = std::fs::rename(from, to) {
+                let mut detail = format!("{} -> {}: {error}", from.display(), to.display());
+                for (old, new) in moves[..index].iter().rev() {
+                    if let Err(rollback) = std::fs::rename(new, old) {
+                        detail.push_str(&format!("; rollback {} -> {} failed: {rollback}", new.display(), old.display()));
+                    }
+                }
+                return Err(std::io::Error::new(error.kind(), detail));
+            }
+        }
+        Ok(())
+    };
+    if let Err(error) = move_files() {
+        g.log(format!("SYSERR: Unable to rename player files: {error}"));
+        send_to_char(g, chid, b"Unable to rename the player's files; the name was not changed. See the system log.\r\n");
+        return false;
+    }
+
     g.player_table[i].name = new_name.to_ascii_lowercase();
     let mut capped = new_name.to_vec();
-    if let Some(c) = capped.first_mut() {
-        *c = c.to_ascii_uppercase();
-    }
+    if let Some(c) = capped.first_mut() { *c = c.to_ascii_uppercase(); }
     g.ch_mut(vict).name = Some(capped);
-
-    // Building an `mv` command string for the pfile and never running it
-    // leaves the pfile rewritten under the new name by the
-    // save_char that perform_set does next, and the old one is orphaned —
-    // along with the player's object, text and variable files, which the
-    // renamed character can then never load. Renaming is the evident intent,
-    // so do it for all four.
-    for kind in [FileKind::Plr, FileKind::Objs, FileKind::Text, FileKind::Vars] {
-        let (Some(from), Some(to)) =
-            (get_filename(kind, &old_name), get_filename(kind, new_name))
-        else {
-            continue;
-        };
-        let from = g.lib_dir.join(from);
-        if from.exists() {
-            let _ = std::fs::rename(&from, g.lib_dir.join(to));
-        }
-    }
 
     crate::players_glue::save_player_index(g);
     let gname = String::from_utf8_lossy(g.ch(chid).get_name()).into_owned();
