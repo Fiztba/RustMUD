@@ -73,7 +73,13 @@ fn identification_quotes_the_actual_quest_point_purchase_price() {
     let gem = g.objs.insert(obj);
     mud_game::handler::obj_to_char(g, gem, keeper);
     let command = mud_game::interpreter::find_command(g, b"identify").unwrap();
-    assert!(mud_game::shop::shop_keeper(g, buyer, keeper, command, b"gem"));
-    let out = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
-    assert!(out.contains("Cost to Buy: 123 qp"), "{out}");
+    for quest in [true, false] {
+        if quest { g.obj_mut(gem).extra_flags.set(flags::ITEM_QUEST); }
+        else { g.obj_mut(gem).extra_flags.remove(flags::ITEM_QUEST); }
+        g.descriptors.get_mut(di).unwrap().output.clear();
+        assert!(mud_game::shop::shop_keeper(g, buyer, keeper, command, b"gem"));
+        let out = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
+        assert!(out.contains(if quest { "Cost to Buy: 123 qp" } else { "Cost to Buy: 246" }), "{out}");
+        if !quest { assert!(!out.contains(" qp"), "{out}"); }
+    }
 }
