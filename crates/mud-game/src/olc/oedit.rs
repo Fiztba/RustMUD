@@ -267,22 +267,10 @@ pub fn oedit_save_internally(g: &mut Game, _di: usize, olc: &mut OlcData) {
         return;
     }
 
-    // Produce lists in shops being edited.
+    // Shop editor products are vnums and remain stable across insertion.
+    // Runtime shop rnums have already been updated by add_object.
     let others: Vec<usize> = g.descriptors.order.clone();
-    for dsc in others.iter().copied() {
-        if g.descriptors.get(dsc).map(|d| d.state) != Some(ConState::Sedit) {
-            continue;
-        }
-        let Some(other) = g.olc.get_mut(&dsc) else { continue };
-        if let Some(shop) = other.shop.as_mut() {
-            for p in shop.producing.iter_mut() {
-                if *p >= robj_num as i32 {
-                    *p += 1;
-                }
-            }
-        }
-    }
-    // And zedit sessions.
+    // Zedit commands do hold rnums.
     for dsc in others {
         if g.descriptors.get(dsc).map(|d| d.state) != Some(ConState::Zedit) {
             continue;
