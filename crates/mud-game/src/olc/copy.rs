@@ -161,10 +161,15 @@ pub fn do_oasis_copy(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, s
             crate::olc::oedit::oedit_setup_existing(g, &mut olc, src_rnum as usize);
             crate::olc::oedit::oedit_save_internally(g, di, &mut olc);
         }
-        _ => {
-            // The remaining editors land with their own modules.
-            return;
+        s if s == ConState::Sedit as i32 => {
+            crate::olc::sedit::sedit_setup_existing(g, &mut olc, src_rnum as usize);
+            crate::olc::sedit::sedit_save_internally(g, di, &mut olc);
         }
+        s if s == ConState::Trigedit as i32 => {
+            crate::olc::trigedit::trigedit_setup_existing(g, &mut olc, src_rnum as usize);
+            crate::olc::trigedit::trigedit_save(g, di, &mut olc);
+        }
+        _ => return,
     }
 
     cleanup_olc(g, di, olc, CLEANUP_ALL);

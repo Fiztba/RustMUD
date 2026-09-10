@@ -254,7 +254,7 @@ pub fn sedit_setup_existing(g: &Game, olc: &mut OlcData, rshop_num: usize) {
     olc.shop = Some(Box::new(shop));
 }
 
-fn sedit_save_internally(g: &mut Game, di: usize, olc: &mut OlcData) {
+pub(crate) fn sedit_save_internally(g: &mut Game, di: usize, olc: &mut OlcData) {
     // Read before add_shop overwrites the record: the mobile this shop used to
     // keep, and the spec proc that mobile had before it was made a keeper.
     let current = real_shop(g, olc.number).map(|r| ShopRtScratch::from_rt(&g.shops_rt[r]));
