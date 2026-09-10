@@ -84,5 +84,57 @@ fn rental_payment_handles_large_balances_and_elapsed_costs() {
     }
     g.ch_mut(ch).points.gold = MAX_GOLD;
     g.ch_mut(ch).points.bank_gold = MAX_BANK;
+    mud_game::objsave::crash_rentsave(g, ch, i32::MAX);
+    g.now = i64::MAX;
+    assert_eq!(mud_game::objsave::crash_load(g, ch), 2);
+    assert_eq!((g.ch(ch).points.gold, g.ch(ch).points.bank_gold), (MAX_GOLD, MAX_BANK));
     mud_game::act::wizstat::do_stat_character(g, ch, ch);
+}
+
+#[test]
+fn rejected_cryo_fees_preserve_inventory_and_balances() {
+    let mut f = fixture("reject");
+    let g = &mut f.game;
+    let ch = player(g, b"Customer", 12345);
+    let obj = mud_game::db::read_object(g, 0).unwrap();
+    mud_game::handler::obj_to_char(g, obj, ch);
+    for cost in [-1, i32::MIN, 151, i32::MAX] {
+        g.ch_mut(ch).points.gold = 50;
+        g.ch_mut(ch).points.bank_gold = 100;
+        mud_game::objsave::crash_cryosave(g, ch, cost);
+        assert_eq!((g.ch(ch).points.gold, g.ch(ch).points.bank_gold), (50, 100));
+        assert_eq!(g.obj(obj).carried_by, Some(ch));
+        assert!(!g.ch(ch).plr(mud_data::flags::PLR_CRYO));
+    }
+}
+
+#[test]
+fn quotes_and_forced_rent_handle_unrepresentable_daily_costs() {
+    let mut f = fixture("quotes");
+    let g = &mut f.game;
+    let ch = player(g, b"Customer", 12345);
+    let di = descriptor(g, ch, ConState::Playing);
+    mud_game::handler::char_to_room(g, ch, 0);
+    g.rooms[0].light = 1;
+    g.config.free_rent = false;
+    g.config.min_rent_cost = 0;
+    g.ch_mut(ch).points.gold = MAX_GOLD;
+    g.ch_mut(ch).points.bank_gold = MAX_BANK;
+    let recep = mud_game::db::read_mobile(g, 0).unwrap();
+    mud_game::handler::char_to_room(g, recep, 0);
+    g.ch_mut(recep).position = POS_STANDING;
+    let obj = mud_game::db::read_object(g, 0).unwrap();
+    g.obj_mut(obj).extra_flags.remove(mud_data::flags::ITEM_NORENT);
+    g.obj_mut(obj).type_flag = mud_data::flags::ITEM_OTHER;
+    g.obj_mut(obj).cost_per_day = 1_500_000_000;
+    mud_game::handler::obj_to_char(g, obj, ch);
+    let rent = mud_game::interpreter::find_command(g, b"rent").unwrap();
+    assert!(mud_game::objsave::gen_receptionist(g, ch, recep, rent, b"", mud_game::objsave::CRYO_FACTOR));
+    assert!(String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output).contains("bill is too large"));
+    assert_eq!(g.obj(obj).carried_by, Some(ch));
+    assert_eq!((g.ch(ch).points.gold, g.ch(ch).points.bank_gold), (MAX_GOLD, MAX_BANK));
+    // Twice the daily rent is also too large for the existing file format.
+    mud_game::objsave::crash_idlesave(g, ch);
+    assert!(g.try_obj(obj).is_none());
+    assert_eq!((g.ch(ch).points.gold, g.ch(ch).points.bank_gold), (MAX_GOLD, MAX_BANK));
 }
