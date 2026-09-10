@@ -223,10 +223,18 @@ fn str_udupnl(s: &[u8]) -> BStr {
     v
 }
 
-fn cedit_save_internally(g: &mut Game, di: usize, olc: &OlcData) {
+fn cedit_save_internally(g: &mut Game, olc: &OlcData) -> bool {
     let new = cfg(olc).clone();
+    let Some(mortal) = g.real_room(new.mortal_start_room) else {
+        return false;
+    };
+    let immortal = g.real_room(new.immort_start_room).unwrap_or(mortal);
+    let frozen = g.real_room(new.frozen_start_room).unwrap_or(mortal);
     let reassign = g.config.dts_are_dumps != new.dts_are_dumps;
     g.config = new;
+    g.r_mortal_start_room = mortal;
+    g.r_immort_start_room = immortal;
+    g.r_frozen_start_room = frozen;
 
     // "if we changed the dts to/from dumps, reassign - Welcor"
     if reassign {
@@ -234,7 +242,7 @@ fn cedit_save_internally(g: &mut Game, di: usize, olc: &OlcData) {
     }
 
     crate::db::add_to_save_list(g, NOWHERE, crate::db::SL_CFG);
-    let _ = di;
+    true
 }
 
 pub fn cedit_save_to_disk(g: &mut Game) -> bool {
@@ -640,7 +648,11 @@ pub fn cedit_parse(
         CEDIT_CONFIRM_SAVESTRING => {
             match lower {
                 b'y' => {
-                    cedit_save_internally(g, di, &olc);
+                    if !cedit_save_internally(g, &olc) {
+                        cedit_disp_menu(g, di, &mut olc);
+                        write_to_desc(g, di, b"The mortal start room no longer exists; choose a valid room before saving.\r\n");
+                        return Some(olc);
+                    }
                     if let Some(chid) = g.descriptors.get(di).and_then(|d| d.character) {
                         let name = String::from_utf8_lossy(g.ch(chid).get_name()).into_owned();
                         let level = (LVL_BUILDER as i16).max(g.ch(chid).invis_lev()) as u8;
