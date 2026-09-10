@@ -53,12 +53,14 @@ fn atoi(b: &[u8]) -> i32 {
 // ---- put ----
 
 fn perform_put(g: &mut Game, chid: CharId, oid: ObjId, cont: ObjId) {
+    if g.try_obj(cont).is_none() || !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) { return; }
     let object_id = crate::dg::obj_script_id(g, oid);
     if crate::dg::triggers::drop_otrigger(g, oid, chid) == 0 {
         return;
     }
     // Object might be extracted by drop_otrigger.
-    if !crate::dg::has_obj_by_uid_in_lookup_table(g, object_id) || g.try_obj(oid).is_none() {
+    if !crate::dg::has_obj_by_uid_in_lookup_table(g, object_id) || !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid))
+        || g.try_obj(cont).is_none() {
         return;
     }
     let cont_v0 = g.obj(cont).values[0];
@@ -75,6 +77,7 @@ fn perform_put(g: &mut Game, chid: CharId, oid: ObjId, cont: ObjId) {
 
         comm::act_full(g, b"$n puts $p in $P.", true, Some(chid), Some(oid), comm::ActArg::Obj(cont), comm::TO_ROOM);
 
+        if !g.try_obj(oid).is_some_and(|o| o.in_obj == Some(cont)) || g.try_obj(cont).is_none() { return; }
         // NODROP contagion.
         if g.obj(oid).obj_flagged(flags::ITEM_NODROP) && !g.obj(cont).obj_flagged(flags::ITEM_NODROP) {
             g.obj_mut(cont).extra_flags.set(flags::ITEM_NODROP);
@@ -240,6 +243,7 @@ fn can_take_obj(g: &mut Game, chid: CharId, oid: ObjId) -> bool {
 }
 
 fn get_check_money(g: &mut Game, chid: CharId, oid: ObjId) {
+    if !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) { return; }
     let value = g.obj(oid).values[0];
     if g.obj(oid).type_flag != flags::ITEM_MONEY || value <= 0 {
         return;
@@ -254,11 +258,12 @@ fn get_check_money(g: &mut Game, chid: CharId, oid: ObjId) {
 }
 
 fn perform_get_from_container(g: &mut Game, chid: CharId, oid: ObjId, cont: ObjId, mode: i32) {
+    if g.try_obj(cont).is_none() || !g.try_obj(oid).is_some_and(|o| o.in_obj == Some(cont)) { return; }
     if mode == FIND_OBJ_INV || can_take_obj(g, chid, oid) {
         if (g.ch(chid).carry_items as i32) >= can_carry_n(g.ch(chid)) {
             act(g, b"$p: you can't hold any more items.", false, Some(chid), Some(oid), None, comm::TO_CHAR);
         } else if crate::dg::triggers::get_otrigger(g, oid, chid) != 0 {
-            if g.try_obj(oid).is_none() {
+            if g.try_obj(cont).is_none() || !g.try_obj(oid).is_some_and(|o| o.in_obj == Some(cont)) {
                 return;
             }
             obj_from_obj(g, oid);
@@ -554,13 +559,13 @@ fn perform_drop(g: &mut Game, chid: CharId, oid: ObjId, mut mode: i32, sname: &[
     if crate::dg::triggers::drop_otrigger(g, oid, chid) == 0 {
         return 0;
     }
-    if !crate::dg::has_obj_by_uid_in_lookup_table(g, object_id) || g.try_obj(oid).is_none() {
+    if !crate::dg::has_obj_by_uid_in_lookup_table(g, object_id) || !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) {
         return 0; // item was extracted by script
     }
     if mode == SCMD_DROP && crate::dg::triggers::drop_wtrigger(g, oid, chid) == 0 {
         return 0;
     }
-    if !crate::dg::has_obj_by_uid_in_lookup_table(g, object_id) || g.try_obj(oid).is_none() {
+    if !crate::dg::has_obj_by_uid_in_lookup_table(g, object_id) || !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) {
         return 0; // item was extracted by script
     }
     if g.obj(oid).obj_flagged(flags::ITEM_NODROP) && !g.ch(chid).prf(flags::PRF_NOHASSLE) {
@@ -584,6 +589,7 @@ fn perform_drop(g: &mut Game, chid: CharId, oid: ObjId, mut mode: i32, sname: &[
         buf.extend_from_slice(vanish(mode));
         act(g, &buf, true, Some(chid), Some(oid), None, comm::TO_ROOM);
     }
+    if !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) { return 0; }
     obj_from_char(g, oid);
 
     if mode == SCMD_DONATE && g.obj(oid).obj_flagged(flags::ITEM_NODONATE) {
