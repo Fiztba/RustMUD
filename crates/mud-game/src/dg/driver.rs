@@ -727,6 +727,10 @@ fn extract_value(g: &mut Game, ctx: DgCtx, cmd: &[u8]) {
     let mut n = num;
     buf = Vec::new();
     while n > 0 {
+        if buf2.is_empty() {
+            buf.clear();
+            break;
+        }
         let (word, rest) = crate::interpreter::half_chop(&buf2);
         buf = word;
         buf2 = rest;
