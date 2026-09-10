@@ -72,6 +72,8 @@ pub struct Descriptor {
 
     pub has_prompt: bool,
     pub inbuf: Vec<u8>,
+    /// Complementary byte of a CRLF/LFCR pair split across reads.
+    pending_line_ending: Option<u8>,
     pub last_input: Vec<u8>,
     pub history: [Vec<u8>; HISTORY_SIZE],
     pub history_pos: usize,
@@ -132,6 +134,7 @@ impl Descriptor {
             editing: None,
             has_prompt: true, // "prompt is part of greetings"
             inbuf: Vec::new(),
+            pending_line_ending: None,
             last_input: Vec::new(),
             history: Default::default(),
             history_pos: 0,
@@ -416,6 +419,13 @@ impl Descriptor {
     }
 
     fn split_lines(&mut self, _bugs: &mut [String], stats: &mut BufStats) -> Result<(), ()> {
+        // Protocol-only reads must not consume this state. A complete pair
+        // clears it so the next deliberate blank line remains a command.
+        if let Some(&first) = self.inbuf.first() {
+            if self.pending_line_ending.take() == Some(first) {
+                self.inbuf.remove(0);
+            }
+        }
         // Line assembly.
         loop {
             let Some(nl_pos) = self.inbuf.iter().position(|c| *c == b'\r' || *c == b'\n') else {
@@ -529,9 +539,17 @@ impl Descriptor {
             // Consume the newline run; the unread tail of an over-long line is
             // discarded (the read point jumps past the newline).
             let mut after = nl_pos;
+            let mut pending = None;
             while after < self.inbuf.len() && (self.inbuf[after] == b'\r' || self.inbuf[after] == b'\n') {
+                let newline = self.inbuf[after];
+                pending = if pending == Some(newline) {
+                    None
+                } else {
+                    Some(if newline == b'\r' { b'\n' } else { b'\r' })
+                };
                 after += 1;
             }
+            self.pending_line_ending = if after == self.inbuf.len() { pending } else { None };
             self.inbuf.drain(..after);
         }
         Ok(())
@@ -944,6 +962,19 @@ mod tests {
         d.feed_input_test(b"\r\n\r\n").unwrap();
         assert_eq!(d.input.len(), 1);
         assert_eq!(d.input.pop_front().unwrap().0, b"");
+    }
+
+    #[test]
+    fn paired_line_endings_survive_every_read_boundary() {
+        for wire in [b"name\r\npassword\r\n".as_slice(), b"name\n\rpassword\n\r"] {
+            for split in 0..=wire.len() {
+                let mut d = desc();
+                d.feed_input_test(&wire[..split]).unwrap();
+                d.feed_input_test(&wire[split..]).unwrap();
+                let lines: Vec<_> = d.input.into_iter().map(|line| line.0).collect();
+                assert_eq!(lines, vec![b"name".to_vec(), b"password".to_vec()], "split {split}");
+            }
+        }
     }
 
     #[test]
