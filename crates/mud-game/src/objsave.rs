@@ -737,7 +737,7 @@ fn scan_flags(s: &[u8]) -> [u32; 4] {
 /// auto_equip: validate the saved slot against the
 /// object's wear flags, then equip only if the slot is free and neither
 /// alignment nor class objects. Anything else lands in inventory.
-fn auto_equip(g: &mut Game, chid: CharId, oid: ObjId, mut location: i32) {
+fn auto_equip(g: &mut Game, chid: CharId, oid: ObjId, mut location: i32) -> i32 {
     if location > 0 {
         let j = (location - 1) as usize;
         let can = |g: &Game, bit: usize| g.obj(oid).can_wear(bit);
@@ -794,6 +794,7 @@ fn auto_equip(g: &mut Game, chid: CharId, oid: ObjId, mut location: i32) {
     if location <= 0 {
         obj_to_char(g, oid, chid);
     }
+    location
 }
 
 /// handle_obj: the cont_row machine that rebuilds
@@ -805,7 +806,9 @@ fn handle_obj(
     locate: i32,
     cont_row: &mut [Vec<ObjId>; MAX_BAG_ROWS],
 ) -> bool {
-    auto_equip(g, chid, oid, locate);
+    // Reconstruct contents using where the container actually landed. Its
+    // saved wear slot may no longer be allowed by the current prototype.
+    let locate = auto_equip(g, chid, oid, locate);
 
     if locate > 0 {
         // Equipped: any deeper pending rows lost their container.
@@ -949,6 +952,12 @@ pub fn crash_load(g: &mut Game, chid: CharId) -> i32 {
         }
     }
 
+    // A removed container prototype can leave its children pending at EOF.
+    for row in &mut cont_row {
+        for oid in std::mem::take(row) {
+            obj_to_char(g, oid, chid);
+        }
+    }
     let level = g.ch(chid).level;
     let max_save = g.config.max_obj_save;
     let god_lvl = (LVL_GOD as i16).max(invis) as u8;
