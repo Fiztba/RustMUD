@@ -62,6 +62,33 @@ fn timed_quests_keep_their_remaining_time_across_reload() {
     players_glue::save_char(g, ch);
     players_glue::load_char_into(g, ch, b"Timer").unwrap();
     assert_eq!(g.ch(ch).ps().quest_time, -1);
+
+    let (mut pf, _) = mud_world::players::load_char(&g.lib_dir, b"Timer").unwrap();
+    let path = g.lib_dir.join(mud_world::players::get_filename(
+        mud_world::players::FileKind::Plr, b"Timer").unwrap());
+    for (stored, expected) in [(None, 5), (Some(-1), -1), (Some(0), 0), (Some(i32::MIN), i32::MIN)] {
+        pf.current_quest = 65000;
+        pf.quest_time = stored;
+        std::fs::write(&path, mud_world::players::save_char(&pf)).unwrap();
+        players_glue::load_char_into(g, ch, b"Timer").unwrap();
+        assert_eq!(g.ch(ch).ps().quest_time, expected);
+        quest::check_timed_quests(g);
+        if expected <= 0 && expected != -1 {
+            assert_eq!(g.ch(ch).ps().current_quest, NOTHING);
+        } else {
+            assert_eq!(g.ch(ch).ps().current_quest, 65000);
+        }
+    }
+    g.world.quests.last_mut().unwrap().time = -1;
+    pf.quest_time = None;
+    std::fs::write(&path, mud_world::players::save_char(&pf)).unwrap();
+    players_glue::load_char_into(g, ch, b"Timer").unwrap();
+    assert_eq!(g.ch(ch).ps().quest_time, -1);
+    pf.current_quest = NOTHING as i32;
+    pf.quest_time = Some(10);
+    std::fs::write(&path, mud_world::players::save_char(&pf)).unwrap();
+    players_glue::load_char_into(g, ch, b"Timer").unwrap();
+    assert_eq!(g.ch(ch).ps().quest_time, -1);
 }
 
 
