@@ -676,15 +676,20 @@ fn perform_subnegotiation(
     output_empty: bool,
 ) {
     match option {
-        TELOPT_TTYPE => perform_ttype(p, data, output_empty),
+        // C gates these three on the negotiated flags; MSDP and ATCP are not.
+        TELOPT_TTYPE => {
+            if p.ttype {
+                perform_ttype(p, data, output_empty);
+            }
+        }
         TELOPT_NAWS => {
-            if data.len() >= 4 {
+            if p.naws && data.len() >= 4 {
                 p.screen_width = ((data[0] as i32) << 8) | data[1] as i32;
                 p.screen_height = ((data[2] as i32) << 8) | data[3] as i32;
             }
         }
         TELOPT_CHARSET => {
-            if data.first() == Some(&CHARSET_ACCEPTED) {
+            if p.charset && data.first() == Some(&CHARSET_ACCEPTED) {
                 p.vars[Var::UTF_8 as usize].value_int = 1;
             }
         }
@@ -1658,7 +1663,7 @@ mod tests {
 
     #[test]
     fn telnet_commands_survive_every_read_boundary() {
-        let wire = [IAC, DO, TELOPT_MSDP, IAC, SB, TELOPT_NAWS,
+        let wire = [IAC, DO, TELOPT_MSDP, IAC, WILL, TELOPT_NAWS, IAC, SB, TELOPT_NAWS,
             0, IAC, IAC, 0, 24, IAC, SE, b'l', b'o', b'o', b'k', b'\n', IAC, IAC];
         for split in 0..=wire.len() {
             let mut p = ProtocolState::new();
@@ -1675,9 +1680,8 @@ mod tests {
     fn bytewise_commands_keep_state_per_connection() {
         let mut p = ProtocolState::new();
         let mut other = ProtocolState::new();
-        let wire = [IAC, WILL, TELOPT_NAWS, IAC, WONT, TELOPT_NAWS,
-            IAC, DO, TELOPT_MSDP, IAC, DONT, TELOPT_MSDP,
-            IAC, SB, TELOPT_NAWS, 0, 80, 0, 24, IAC, SE, b'x'];
+        let wire = [IAC, WILL, TELOPT_NAWS, IAC, SB, TELOPT_NAWS, 0, 80, 0, 24, IAC, SE,
+            IAC, WONT, TELOPT_NAWS, IAC, DO, TELOPT_MSDP, IAC, DONT, TELOPT_MSDP, b'x'];
         let mut input = Vec::new();
         for (i, &byte) in wire.iter().enumerate() {
             let result = protocol_input(&mut p, &[byte], true);
@@ -1686,7 +1690,7 @@ mod tests {
             assert!(protocol_input(&mut p, &[], true).in_band.is_empty());
             assert_eq!(protocol_input(&mut other, b"y", true).in_band, b"y");
             if i == 2 { assert!(p.naws); }
-            if i == 8 { assert!(p.msdp); }
+            if i == 17 { assert!(p.msdp); }
         }
         assert!(!p.naws && !p.msdp);
         assert_eq!((p.screen_width, p.screen_height), (80, 24));
@@ -1813,7 +1817,7 @@ mod tests {
     fn split_subnegotiation_survives_reads() {
         // Fragments across reads must be joined.
         let mut p = ProtocolState::new();
-        let _ = protocol_input(&mut p, &[IAC, SB, TELOPT_NAWS, 0, 80], false);
+        let _ = protocol_input(&mut p, &[IAC, WILL, TELOPT_NAWS, IAC, SB, TELOPT_NAWS, 0, 80], false);
         let r = protocol_input(&mut p, &[0, 25, IAC, SE], false);
         assert!(!r.fatal);
         assert_eq!((p.screen_width, p.screen_height), (80, 25));
@@ -1821,7 +1825,7 @@ mod tests {
 
     #[test]
     fn ttype_fingerprints_xterm() {
-        let mut p = ProtocolState::new();
+        let mut p = ttype_negotiated();
         let mut data = vec![IAC, SB, TELOPT_TTYPE, TELQUAL_IS];
         data.extend_from_slice(b"xterm-256color");
         data.extend_from_slice(&[IAC, SE]);
@@ -1845,13 +1849,85 @@ mod tests {
         p.out.windows(TTYPE_REQUEST.len()).filter(|w| *w == TTYPE_REQUEST).count()
     }
 
+    /// A state whose client has answered WILL TTYPE, with the negotiation
+    /// burst it triggers already drained so `requests` counts only cycling.
+    fn ttype_negotiated() -> ProtocolState {
+        let mut p = ProtocolState::new();
+        let _ = protocol_input(&mut p, &[IAC, WILL, TELOPT_TTYPE], false);
+        assert!(p.ttype);
+        p.out.clear();
+        p
+    }
+
+    // ---- Subnegotiations the client never negotiated ----
+    //
+    // C's PerformSubnegotiation wraps the TTYPE, NAWS and CHARSET arms in
+    // `if (pProtocol->bTTYPE)` etc., so an unsolicited subnegotiation is
+    // dropped on the floor. MSDP and ATCP carry no such guard.
+
+    #[test]
+    fn unnegotiated_ttype_subnegotiation_is_ignored() {
+        let mut p = ProtocolState::new();
+        ttype(&mut p, b"MUSHCLIENT");
+        assert_eq!(p.var_str(Var::CLIENT_ID), b"Unknown", "CLIENT_ID set without WILL TTYPE");
+        assert!(p.last_ttype.is_none());
+        assert!(p.out.is_empty(), "unsolicited TTYPE produced output: {:?}", p.out);
+
+        let _ = protocol_input(&mut p, &[IAC, WILL, TELOPT_TTYPE], false);
+        p.out.clear();
+        ttype(&mut p, b"MUSHCLIENT");
+        assert_eq!(p.var_str(Var::CLIENT_ID), b"MUSHCLIENT");
+        assert_eq!(requests(&p), 1);
+    }
+
+    #[test]
+    fn unnegotiated_naws_subnegotiation_is_ignored() {
+        let mut p = ProtocolState::new();
+        let _ = protocol_input(&mut p, &[IAC, SB, TELOPT_NAWS, 0, 200, 0, 50, IAC, SE], false);
+        assert_eq!((p.screen_width, p.screen_height), (0, 0), "NAWS applied without WILL NAWS");
+        assert!(p.out.is_empty());
+
+        let _ = protocol_input(&mut p, &[IAC, WILL, TELOPT_NAWS], false);
+        let _ = protocol_input(&mut p, &[IAC, SB, TELOPT_NAWS, 0, 200, 0, 50, IAC, SE], false);
+        assert_eq!((p.screen_width, p.screen_height), (200, 50));
+    }
+
+    #[test]
+    fn unnegotiated_charset_subnegotiation_is_ignored() {
+        let mut p = ProtocolState::new();
+        let accepted = [IAC, SB, TELOPT_CHARSET, CHARSET_ACCEPTED, b'U', b'T', b'F', b'-', b'8', IAC, SE];
+        let _ = protocol_input(&mut p, &accepted, false);
+        assert_eq!(p.var_int(Var::UTF_8), 0, "UTF_8 set without WILL CHARSET");
+        assert!(p.out.is_empty());
+
+        let _ = protocol_input(&mut p, &[IAC, WILL, TELOPT_CHARSET], false);
+        assert!(p.charset);
+        let _ = protocol_input(&mut p, &accepted, false);
+        assert_eq!(p.var_int(Var::UTF_8), 1);
+    }
+
+    /// Pins the C asymmetry: ParseMSDP runs whether or not the client ever
+    /// answered DO MSDP.
+    #[test]
+    fn unnegotiated_msdp_subnegotiation_is_still_processed() {
+        let mut p = ProtocolState::new();
+        assert!(!p.msdp);
+        let mut wire = vec![IAC, SB, TELOPT_MSDP, MSDP_VAR];
+        wire.extend_from_slice(b"REPORT");
+        wire.push(MSDP_VAL);
+        wire.extend_from_slice(b"HEALTH");
+        wire.extend_from_slice(&[IAC, SE]);
+        let _ = protocol_input(&mut p, &wire, false);
+        assert!(p.vars[Var::HEALTH as usize].report, "MSDP REPORT ignored without DO MSDP");
+    }
+
     /// C short-circuits its cycle test on `pLastTTYPE == NULL`, so the first
     /// response always asks again — even though CLIENT_ID was just set from
     /// that same name. Missing that arm made the test always stop on the
     /// first response, so no client was ever cycled.
     #[test]
     fn ttype_first_response_always_asks_again() {
-        let mut p = ProtocolState::new();
+        let mut p = ttype_negotiated();
         ttype(&mut p, b"PROBE");
         assert_eq!(p.var_str(Var::CLIENT_ID), b"PROBE");
         assert_eq!(requests(&p), 1, "first TTYPE response did not re-request");
@@ -1860,7 +1936,7 @@ mod tests {
     /// A repeat of the same name ends the cycle (RFC1091's end-of-list).
     #[test]
     fn ttype_repeated_response_stops_the_cycle() {
-        let mut p = ProtocolState::new();
+        let mut p = ttype_negotiated();
         ttype(&mut p, b"PROBE");
         p.out.clear();
         ttype(&mut p, b"PROBE");
@@ -1872,7 +1948,7 @@ mod tests {
     /// the one left recorded.
     #[test]
     fn ttype_wrapping_to_client_id_stops_and_leaves_the_previous_name() {
-        let mut p = ProtocolState::new();
+        let mut p = ttype_negotiated();
         ttype(&mut p, b"A");
         ttype(&mut p, b"B");
         assert_eq!(requests(&p), 2, "second distinct name should re-request");
@@ -1887,7 +1963,7 @@ mod tests {
     /// lives in the branch that initialises CLIENT_ID.
     #[test]
     fn ttype_ansi_first_response_sends_no_request() {
-        let mut p = ProtocolState::new();
+        let mut p = ttype_negotiated();
         ttype(&mut p, b"ANSI");
         assert_eq!(requests(&p), 0, "ANSI must not be cycled");
         assert_eq!(p.last_ttype.as_deref(), Some(b"ANSI" as &[u8]));
@@ -1895,7 +1971,7 @@ mod tests {
 
     #[test]
     fn ttype_ansi_as_a_later_response_does_not_stop_the_cycle() {
-        let mut p = ProtocolState::new();
+        let mut p = ttype_negotiated();
         ttype(&mut p, b"PROBE");
         p.out.clear();
         ttype(&mut p, b"ANSI");
@@ -1905,7 +1981,7 @@ mod tests {
     #[test]
     fn ttype_256color_suffix_accepts_multi_hyphen_names() {
         for name in [b"screen-256color".as_slice(), b"rxvt-unicode-256color", b"SCREEN.XTERM-256COLOR"] {
-            let mut p = ProtocolState::new();
+            let mut p = ttype_negotiated();
             ttype(&mut p, name);
             assert_eq!(p.var_int(Var::XTERM_256_COLORS), 1, "{name:?}");
             assert_eq!(p.b256_support, Support::Yes);
@@ -1915,11 +1991,11 @@ mod tests {
     #[test]
     fn ttype_color_suffix_is_exact_and_works_in_later_responses() {
         for name in [b"".as_slice(), b"x", b"256color", b"rxvt-unicode", b"screen-256color-extra", b"screen-256colors"] {
-            let mut p = ProtocolState::new();
+            let mut p = ttype_negotiated();
             ttype(&mut p, name);
             assert_eq!(p.var_int(Var::XTERM_256_COLORS), 0, "{name:?}");
         }
-        let mut p = ProtocolState::new();
+        let mut p = ttype_negotiated();
         ttype(&mut p, b"PROBE");
         ttype(&mut p, b"RXVT-UNICODE-256COLOR");
         assert_eq!(p.var_int(Var::XTERM_256_COLORS), 1);
@@ -1933,7 +2009,7 @@ mod tests {
     /// it was unreachable while the first response ended the cycle.
     #[test]
     fn ttype_cycle_reaches_the_mtts_bitmask() {
-        let mut p = ProtocolState::new();
+        let mut p = ttype_negotiated();
         ttype(&mut p, b"TINTIN++");
         assert_eq!(requests(&p), 1, "cycle must ask for the next TTYPE");
         ttype(&mut p, b"MTTS 13"); // ANSI(1) | 256(8) | UTF-8(4)
@@ -1951,7 +2027,7 @@ mod tests {
     /// silently break.)
     #[test]
     fn ttype_cycle_and_fingerprint_both_run_on_one_response() {
-        let mut p = ProtocolState::new();
+        let mut p = ttype_negotiated();
         ttype(&mut p, b"Mudlet 1.1");
         assert_eq!(requests(&p), 1, "cycle did not ask again");
         assert_eq!(p.last_ttype.as_deref(), Some(b"Mudlet 1.1" as &[u8]));
