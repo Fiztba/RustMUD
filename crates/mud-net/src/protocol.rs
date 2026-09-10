@@ -1228,24 +1228,10 @@ pub fn mssp_set_players(count: i64, now: i64) {
     });
 }
 
-fn unicode_get(cp: u32) -> Vec<u8> {
-    let mut out = Vec::new();
-    if cp < 0x80 {
-        out.push(cp as u8);
-    } else if cp < 0x800 {
-        out.push(0xC0 | (cp >> 6) as u8);
-        out.push(0x80 | (cp & 0x3F) as u8);
-    } else if cp < 0x10000 {
-        out.push(0xE0 | (cp >> 12) as u8);
-        out.push(0x80 | ((cp >> 6) & 0x3F) as u8);
-        out.push(0x80 | (cp & 0x3F) as u8);
-    } else {
-        out.push(0xF0 | (cp >> 18) as u8);
-        out.push(0x80 | ((cp >> 12) & 0x3F) as u8);
-        out.push(0x80 | ((cp >> 6) & 0x3F) as u8);
-        out.push(0x80 | (cp & 0x3F) as u8);
-    }
-    out
+fn unicode_get(cp: u32) -> Option<Vec<u8>> {
+    let scalar = char::from_u32(cp)?;
+    let mut bytes = [0; 4];
+    Some(scalar.encode_utf8(&mut bytes).as_bytes().to_vec())
 }
 
 fn is_valid_colour(buf: &[u8]) -> bool {
@@ -1406,7 +1392,7 @@ pub fn protocol_output(
                         let mut number: u32 = 0;
                         while j + 1 < data.len() && data[j + 1].is_ascii_digit() {
                             j += 1;
-                            number = number.wrapping_mul(10).wrapping_add((data[j] - b'0') as u32);
+                            number = number.saturating_mul(10).saturating_add((data[j] - b'0') as u32);
                         }
                         j += 1; // move past last digit (or onto '/'/']'/end)
                         if data.get(j) == Some(&b'/') {
@@ -1437,7 +1423,7 @@ pub fn protocol_output(
                                 String::from_utf8_lossy(&buffer)
                             ));
                         } else if p.var_int(Var::UTF_8) != 0 {
-                            copy = Some(unicode_get(number));
+                            copy = Some(unicode_get(number).unwrap_or_else(|| buffer.clone()));
                         } else {
                             copy = Some(buffer.clone());
                         }
@@ -1737,6 +1723,37 @@ mod tests {
             p.vars[Var::XTERM_256_COLORS as usize].value_int = 1;
         }
         p
+    }
+
+    #[test]
+    fn unicode_substitutes_reject_invalid_scalars_and_wrapping_numbers() {
+        let mut p = ProtocolState::new();
+        p.set_number(Var::UTF_8, 1);
+        for number in ["55296", "57343", "1114112", "4294967361", "999999999999999999999999"] {
+            let mut bugs = Vec::new();
+            let input = format!("before\t[U{number}/?]after");
+            let output = protocol_output(&mut p, input.as_bytes(), true, &mut bugs).unwrap();
+            assert_eq!(output, b"before?after", "{number}");
+            assert!(std::str::from_utf8(&output).is_ok());
+        }
+    }
+
+    #[test]
+    fn unicode_substitutes_preserve_valid_scalars_and_ascii_fallbacks() {
+        for utf8 in [false, true] {
+            let mut p = ProtocolState::new();
+            p.set_number(Var::UTF_8, i64::from(utf8));
+            for cp in [0x41, 0x7f, 0x80, 0x7ff, 0x800, 0xd7ff, 0xe000, 0xffff, 0x10000, 0x10ffff] {
+                let mut bugs = Vec::new();
+                let input = format!("\t[U{cp}/ascii]");
+                let output = protocol_output(&mut p, input.as_bytes(), false, &mut bugs).unwrap();
+                let expected = if utf8 { char::from_u32(cp).unwrap().to_string().into_bytes() } else { b"ascii".to_vec() };
+                assert_eq!(output, expected, "{cp}");
+                assert!(bugs.is_empty());
+            }
+            let output = protocol_output(&mut p, b"a\t[U55296/]b\t[U1114112/backup]c", false, &mut Vec::new()).unwrap();
+            assert_eq!(output, b"abbackupc");
+        }
     }
 
     #[test]
