@@ -41,6 +41,16 @@ use crate::olc::{
     OlcData, CLEANUP_ALL, MAX_DUPLICATES,
 };
 
+const HEADER_NAME: Idx = 1 << 0;
+const HEADER_BUILDERS: Idx = 1 << 1;
+const HEADER_LIFE: Idx = 1 << 2;
+const HEADER_RESET: Idx = 1 << 3;
+const HEADER_BOT: Idx = 1 << 4;
+const HEADER_TOP: Idx = 1 << 5;
+const HEADER_MIN: Idx = 1 << 6;
+const HEADER_MAX: Idx = 1 << 7;
+const HEADER_FLAGS: Idx = 1 << 8;
+
 /// Submodes of ZEDIT connectedness.
 pub const ZEDIT_MAIN_MENU: i32 = 0;
 pub const ZEDIT_DELETE_ENTRY: i32 = 1;
@@ -351,77 +361,36 @@ fn zedit_save_internally(g: &mut Game, di: usize, olc: &mut OlcData) {
     };
     let zone = olc.zone_num as usize;
 
-    remove_room_zone_commands(g, zone, room_num);
-
-    // Circle does not record which room a 'G'/'E'/'P' belongs to, but Oasis
-    // groups reset commands by room — so a give/equip/put with nothing
-    // loaded before it would wander the zone list looking for something to
-    // latch onto. Those are dropped here instead (C.Raehl 4/27/99).
-    //
-    // Using `subcmd` as both the scratch index and the insert
-    // position lets a skip leave the position running ahead of the real
-    // list. `add_cmd_to_list` never inserts past the end — it copies the
-    // old 'S' terminator into place and drops the command without a word —
-    // so on a zone whose command list is shorter than the scratch index (a
-    // new zone, or one where this room owns most of the resets) a single
-    // misplaced give/equip/put silently discards **every** reset command
-    // for the room. The insert position therefore advances only when
-    // something is actually inserted.
-    let mut mobloaded = false;
-    let mut objloaded = false;
-    let mut pos = 0usize;
-    let cmds = olc.zone.as_ref().map(|z| z.cmds.clone()).unwrap_or_default();
-    for cmd in cmds.into_iter() {
-        match cmd.command {
-            b'G' | b'E' => {
-                if !mobloaded {
-                    write_to_desc(
-                        g,
-                        di,
-                        b"Equip/Give command not saved since no mob was loaded first.\r\n",
-                    );
-                    continue;
-                }
+    // Metadata edits must not regroup or filter an unchanged reset list.
+    if olc.zone_age != 0 {
+        let mut pos = remove_room_zone_commands(g, zone, room_num);
+        let mut mobloaded = false;
+        let cmds = olc.zone.as_ref().map(|z| z.cmds.clone()).unwrap_or_default();
+        for cmd in cmds {
+            if matches!(cmd.command, b'G' | b'E') && !mobloaded {
+                write_to_desc(g, di, b"Equip/Give command not saved since no mob was loaded first.\r\n");
+                continue;
             }
-            b'P' => {
-                if !objloaded {
-                    write_to_desc(
-                        g,
-                        di,
-                        b"Put command not saved since another object was not loaded first.\r\n",
-                    );
-                    continue;
-                }
-            }
-            b'M' => mobloaded = true,
-            b'O' => objloaded = true,
-            _ => {
-                mobloaded = false;
-                objloaded = false;
-            }
+            // The reset interpreter retains its mobile across T/V/D/R/O/P.
+            // P names its container explicitly and can use one already in the world.
+            if cmd.command == b'M' { mobloaded = true; }
+            add_cmd_to_list(&mut g.world.zones[zone], cmd, pos);
+            pos += 1;
         }
-        add_cmd_to_list(&mut g.world.zones[zone], cmd, pos);
-        pos += 1;
     }
 
-    // Finally, if zone headers have been changed, copy over.
-    if olc.zone.as_ref().is_some_and(|z| z.number != 0) {
-        let scratch = olc.zone.as_ref().unwrap();
-        let (name, builders) = (scratch.name.clone(), scratch.builders.clone());
-        let (bot, top) = (scratch.bot, scratch.top);
-        let (reset_mode, lifespan) = (scratch.reset_mode, scratch.lifespan);
-        let (min_level, max_level) = (scratch.min_level, scratch.max_level);
-        let zone_flags = scratch.zone_flags;
+    // Different rooms may be edited concurrently; copy only changed header fields.
+    if let Some(scratch) = olc.zone.as_ref() {
         let dst = &mut g.world.zones[zone];
-        dst.name = name;
-        dst.builders = builders;
-        dst.bot = bot;
-        dst.top = top;
-        dst.reset_mode = reset_mode;
-        dst.lifespan = lifespan;
-        dst.min_level = min_level;
-        dst.max_level = max_level;
-        dst.zone_flags = zone_flags;
+        if scratch.number & HEADER_NAME != 0 { dst.name = scratch.name.clone(); }
+        if scratch.number & HEADER_BUILDERS != 0 { dst.builders = scratch.builders.clone(); }
+        if scratch.number & HEADER_BOT != 0 { dst.bot = scratch.bot; }
+        if scratch.number & HEADER_TOP != 0 { dst.top = scratch.top; }
+        if scratch.number & HEADER_RESET != 0 { dst.reset_mode = scratch.reset_mode; }
+        if scratch.number & HEADER_LIFE != 0 { dst.lifespan = scratch.lifespan; }
+        if scratch.number & HEADER_MIN != 0 { dst.min_level = scratch.min_level; }
+        if scratch.number & HEADER_MAX != 0 { dst.max_level = scratch.max_level; }
+        if scratch.number & HEADER_FLAGS != 0 { dst.zone_flags = scratch.zone_flags; }
     }
     let number = g.world.zones[zone].number;
     add_to_save_list(g, number, SL_ZON);
@@ -1046,7 +1015,7 @@ pub fn zedit_parse(
                 if let Some(zone) = olc.zone.as_mut() {
                     zone.min_level = -1;
                     zone.max_level = -1;
-                    zone.number = 1;
+                    zone.number |= HEADER_MIN | HEADER_MAX;
                 }
                 zedit_disp_menu(g, di, &mut olc);
             }
@@ -1058,7 +1027,7 @@ pub fn zedit_parse(
             let pos = atoi(arg);
             if let Some(zone) = olc.zone.as_mut() {
                 zone.min_level = pos.max(-1).min(100);
-                zone.number = 1;
+                zone.number |= HEADER_MIN;
             }
             zedit_disp_levels(g, di, &mut olc);
         }
@@ -1067,7 +1036,7 @@ pub fn zedit_parse(
             let pos = atoi(arg);
             if let Some(zone) = olc.zone.as_mut() {
                 zone.max_level = pos.max(-1).min(100);
-                zone.number = 1;
+                zone.number |= HEADER_MAX;
             }
             zedit_disp_levels(g, di, &mut olc);
         }
@@ -1395,7 +1364,7 @@ pub fn zedit_parse(
                     }
                     let zone = olc.zone.as_mut().unwrap();
                     zone.name = Some(text);
-                    zone.number = 1;
+                    zone.number |= HEADER_NAME;
                 }
             }
             zedit_disp_menu(g, di, &mut olc);
@@ -1413,7 +1382,7 @@ pub fn zedit_parse(
                     }
                     let zone = olc.zone.as_mut().unwrap();
                     zone.builders = Some(text);
-                    zone.number = 1;
+                    zone.number |= HEADER_BUILDERS;
                 }
             }
             zedit_disp_menu(g, di, &mut olc);
@@ -1426,7 +1395,7 @@ pub fn zedit_parse(
             } else {
                 if let Some(zone) = olc.zone.as_mut() {
                     zone.reset_mode = pos;
-                    zone.number = 1;
+                    zone.number |= HEADER_RESET;
                 }
                 zedit_disp_menu(g, di, &mut olc);
             }
@@ -1439,7 +1408,7 @@ pub fn zedit_parse(
             } else {
                 if let Some(zone) = olc.zone.as_mut() {
                     zone.lifespan = pos;
-                    zone.number = 1;
+                    zone.number |= HEADER_LIFE;
                 }
                 zedit_disp_menu(g, di, &mut olc);
             }
@@ -1456,7 +1425,7 @@ pub fn zedit_parse(
                 let bit = (number - 1) as usize;
                 if let Some(zone) = olc.zone.as_mut() {
                     zone.zone_flags[bit / 32] ^= 1 << (bit % 32);
-                    zone.number = 1;
+                    zone.number |= HEADER_FLAGS;
                 }
                 zedit_disp_flag_menu(g, di, &mut olc);
             }
@@ -1471,7 +1440,7 @@ pub fn zedit_parse(
             if let Some(zone) = olc.zone.as_mut() {
                 let high = zone.top as i32;
                 zone.bot = limit(atoi(arg), low, high) as Idx;
-                zone.number = 1;
+                zone.number |= HEADER_BOT;
             }
             zedit_disp_menu(g, di, &mut olc);
         }
@@ -1479,14 +1448,14 @@ pub fn zedit_parse(
         ZEDIT_ZONE_TOP => {
             let top_of_zone_table = g.world.zones.len().saturating_sub(1) as i32;
             let high = if olc.zone_num == top_of_zone_table {
-                32000
+                NOWHERE as i32 - 1
             } else {
                 g.world.zones[olc.zone_num as usize + 1].bot as i32 - 1
             };
             if let Some(zone) = olc.zone.as_mut() {
                 let low = zone.bot as i32;
                 zone.top = limit(atoi(arg), low, high) as Idx;
-                zone.number = 1;
+                zone.number |= HEADER_TOP;
             }
             zedit_disp_menu(g, di, &mut olc);
         }
