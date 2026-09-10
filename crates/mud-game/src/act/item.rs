@@ -50,6 +50,11 @@ fn atoi(b: &[u8]) -> i32 {
     handler::atoi(b)
 }
 
+// Capture an actionable item's location before callbacks can move or remove it.
+fn item_location(g: &Game, oid: ObjId) -> Option<(Option<CharId>, Option<ObjId>, RoomRnum)> {
+    g.try_obj(oid).map(|o| (o.carried_by, o.in_obj, o.in_room))
+}
+
 // ---- put ----
 
 fn perform_put(g: &mut Game, chid: CharId, oid: ObjId, cont: ObjId) {
@@ -1094,10 +1099,11 @@ pub fn do_drink(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd
         send_to_char(g, chid, b"It is empty.\r\n");
         return;
     }
+    let location = item_location(g, temp);
     if crate::dg::triggers::consume_otrigger(g, temp, chid, crate::dg::OCMD_DRINK) == 0 {
         return;
     }
-    if g.try_obj(temp).is_none() {
+    if item_location(g, temp) != location {
         return;
     }
 
@@ -1108,6 +1114,7 @@ pub fn do_drink(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd
         buf.extend_from_slice(tables::DRINKS[liq].as_bytes());
         buf.extend_from_slice(b" from $p.");
         act(g, &buf, true, Some(chid), Some(temp), None, comm::TO_ROOM);
+        if item_location(g, temp) != location { return; }
 
         send_to_char(g, chid, format!("You drink the {}.\r\n", tables::DRINKS[liq]).as_bytes());
 
@@ -1118,6 +1125,7 @@ pub fn do_drink(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd
         }
     } else {
         act(g, b"$n sips from $p.", true, Some(chid), Some(temp), None, comm::TO_ROOM);
+        if item_location(g, temp) != location { return; }
         send_to_char(g, chid, format!("It tastes like {}.\r\n", tables::DRINKS[liq]).as_bytes());
         amount = 1;
     }
@@ -1155,6 +1163,7 @@ pub fn do_drink(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd
         af.bitvector.set(flags::AFF_POISON);
         handler::affect_join(g, chid, af, false, false, false, false);
     }
+    if item_location(g, temp) != location { return; }
     // Empty the container (unless unlimited), and no longer poison.
     if limited_drink_container(g, temp) {
         let amount = amount.min(g.obj(temp).values[1]);
@@ -1203,10 +1212,11 @@ pub fn do_eat(g: &mut Game, chid: CharId, argument: &[u8], cmd: usize, subcmd: i
         send_to_char(g, chid, b"You are too full to eat more!\r\n");
         return;
     }
+    let location = item_location(g, food);
     if crate::dg::triggers::consume_otrigger(g, food, chid, crate::dg::OCMD_EAT) == 0 {
         return;
     }
-    if g.try_obj(food).is_none() {
+    if item_location(g, food) != location {
         return;
     }
 
@@ -1218,6 +1228,7 @@ pub fn do_eat(g: &mut Game, chid: CharId, argument: &[u8], cmd: usize, subcmd: i
         act(g, b"$n tastes a little bit of $p.", true, Some(chid), Some(food), None, comm::TO_ROOM);
     }
 
+    if item_location(g, food) != location { return; }
     let amount = if subcmd == SCMD_EAT { g.obj(food).values[0] } else { 1 };
     gain_condition(g, chid, HUNGER, amount);
 
@@ -1234,6 +1245,7 @@ pub fn do_eat(g: &mut Game, chid: CharId, argument: &[u8], cmd: usize, subcmd: i
         af.bitvector.set(flags::AFF_POISON);
         handler::affect_join(g, chid, af, false, false, false, false);
     }
+    if item_location(g, food) != location { return; }
     if subcmd == SCMD_EAT {
         extract_obj(g, food);
     } else {
@@ -1307,6 +1319,7 @@ pub fn do_pour(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd:
         from_obj = Some(fo);
     }
     let from_obj = from_obj.unwrap();
+    let from_location = item_location(g, from_obj);
     if empty_drink_container(g, from_obj) {
         act(g, b"The $p is empty.", false, Some(chid), Some(from_obj), None, comm::TO_CHAR);
         return;
@@ -1324,6 +1337,7 @@ pub fn do_pour(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd:
             }
             // Pour out.
             act(g, b"$n empties $p.", true, Some(chid), Some(from_obj), None, comm::TO_ROOM);
+            if item_location(g, from_obj) != from_location { return; }
             act(g, b"You empty $p.", false, Some(chid), Some(from_obj), None, comm::TO_CHAR);
 
             let now = g.obj(from_obj).values[1];
@@ -1349,6 +1363,7 @@ pub fn do_pour(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd:
         to_obj = Some(to);
     }
     let to_obj = to_obj.unwrap();
+    let to_location = item_location(g, to_obj);
     if to_obj == from_obj {
         send_to_char(g, chid, b"A most unproductive effort.\r\n");
         return;
@@ -1376,6 +1391,7 @@ pub fn do_pour(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd:
         comm::act_full(g, b"You gently fill $p from $P.", false, Some(chid), Some(to_obj), comm::ActArg::Obj(from_obj), comm::TO_CHAR);
         comm::act_full(g, b"$n gently fills $p from $P.", true, Some(chid), Some(to_obj), comm::ActArg::Obj(from_obj), comm::TO_ROOM);
     }
+    if item_location(g, from_obj) != from_location || item_location(g, to_obj) != to_location { return; }
     // New alias.
     if empty_drink_container(g, to_obj) {
         name_to_drinkcon(g, to_obj, g.obj(from_obj).values[2]);
@@ -1439,6 +1455,7 @@ fn wear_message(g: &mut Game, chid: CharId, oid: ObjId, where_: usize) {
         [b"$n grabs $p.", b"You grab $p."],
     ];
     act(g, WEAR_MESSAGES[where_][0], true, Some(chid), Some(oid), None, comm::TO_ROOM);
+    if !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) { return; }
     act(g, WEAR_MESSAGES[where_][1], false, Some(chid), Some(oid), None, comm::TO_CHAR);
 }
 
@@ -1507,6 +1524,7 @@ fn perform_wear(g: &mut Game, chid: CharId, oid: ObjId, mut where_: usize) {
         return;
     }
     wear_message(g, chid, oid, where_);
+    if !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) { return; }
     obj_from_char(g, oid);
     handler::equip_char(g, chid, oid, where_);
 }
@@ -1852,7 +1870,9 @@ pub fn do_sac(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd:
         return;
     }
 
+    let location = item_location(g, j);
     act(g, b"$n sacrifices $p.", false, Some(chid), Some(j), None, comm::TO_ROOM);
+    if item_location(g, j) != location { return; }
 
     let short = obj_short(g, j).to_vec();
     let obj_level = g.obj(j).level;
