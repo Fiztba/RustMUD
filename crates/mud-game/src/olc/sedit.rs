@@ -661,6 +661,13 @@ pub fn sedit_parse(
     mut olc: Box<OlcData>,
     arg: &[u8],
 ) -> Option<Box<OlcData>> {
+    if matches!(olc.mode, SEDIT_KEEPER | SEDIT_NEW_PRODUCT | SEDIT_NEW_ROOM) {
+        let number = atoi(arg);
+        if !is_number(arg) || (number != -1 && !(0..NOTHING as i32).contains(&number)) {
+            write_to_desc(g, di, b"Enter a VNUM from 0 to 65534, or -1 for none : ");
+            return Some(olc);
+        }
+    }
     // The whole answer is tested, not just the byte after a leading `-`:
     // that weaker test lets every non-numeric answer through as 0.
     if olc.mode > SEDIT_NUMERICAL_RESPONSE {
