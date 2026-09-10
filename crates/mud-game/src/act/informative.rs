@@ -2937,10 +2937,10 @@ pub fn do_users(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcm
         let original = d.original;
         let character = d.character;
 
-        if state != ConState::Playing && playing {
+        if !is_playing && playing {
             continue;
         }
-        if state == ConState::Playing && deadweight {
+        if is_playing && deadweight {
             continue;
         }
 
