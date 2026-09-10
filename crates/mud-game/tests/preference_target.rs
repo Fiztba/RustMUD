@@ -73,4 +73,11 @@ fn removed_target_closes_preference_editor() {
         assert!(!g.olc.contains_key(&di));
         assert!(!g.ch(editor).act.is_set(flags::PLR_WRITING));
     }
+    // The same editor can subsequently edit and save their own preferences.
+    mud_game::olc::prefedit::do_oasis_prefedit(g, editor, b"", 0, 0);
+    for input in [b"l".as_slice(), b"35", b"q", b"y"] {
+        assert!(mud_game::olc::olc_parse(g, di, input));
+    }
+    assert_eq!(g.ch(editor).player_specials.as_ref().unwrap().page_length, 35);
+    assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Playing);
 }
