@@ -770,9 +770,17 @@ pub fn aedit_parse(
         }
 
         AEDIT_ACTION_NAME | AEDIT_SORT_AS => {
-            if arg.is_empty() || arg.contains(&b' ') {
+            if arg.is_empty() || arg.iter().any(u8::is_ascii_whitespace) {
                 aedit_disp_menu(g, di, &mut olc);
                 return Some(olc);
+            }
+            if olc.mode == AEDIT_ACTION_NAME {
+                let own_command = g.socials.get(olc.zone_num as usize).map(|s| s.act_nr);
+                if g.commands.iter().enumerate().any(|(i, c)|
+                    Some(i) != own_command && c.command.eq_ignore_ascii_case(arg)) {
+                    write_to_desc(g, di, b"That command name already exists.\r\n");
+                    return Some(olc);
+                }
             }
             let a = olc.action.as_mut().unwrap();
             if olc.mode == AEDIT_ACTION_NAME {
