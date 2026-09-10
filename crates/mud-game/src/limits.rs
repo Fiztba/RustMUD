@@ -546,11 +546,11 @@ pub fn decrease_bank(g: &mut Game, chid: CharId, deduction: i32) -> i32 {
     g.ch(chid).points.bank_gold
 }
 
-/// update_object: timer countdown, recursing contents
-/// and the rest of the content chain.
+/// Age carried corpses, recursing through containers. Other object timers
+/// are decremented once in point_update, where their triggers also fire.
 fn update_object(g: &mut Game, oid: mud_data::ids::ObjId, use_: i32) {
-    if g.obj(oid).timer > 0 {
-        g.obj_mut(oid).timer -= use_;
+    if crate::handler::is_corpse(g, oid) && g.obj(oid).timer > 0 {
+        g.obj_mut(oid).timer = (g.obj(oid).timer - use_).max(0);
     }
     let contents = g.obj(oid).contains.clone();
     for c in contents {
@@ -559,7 +559,7 @@ fn update_object(g: &mut Game, oid: mud_data::ids::ObjId, use_: i32) {
 }
 
 /// update_char_objects: worn-light burn-down + timer
-/// aging (equipped ×2, carried ×1). Called once per mud hour from
+/// corpse aging (equipped ×2, carried ×1). Called once per mud hour from
 /// point_update.
 pub fn update_char_objects(g: &mut Game, chid: CharId) {
     if let Some(light) = g.ch(chid).equipment[WEAR_LIGHT] {
