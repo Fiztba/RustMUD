@@ -1296,6 +1296,10 @@ pub fn do_vstat(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcm
         return;
     }
     let num = atoi(&buf2);
+    if !(0..NOTHING as i32).contains(&num) {
+        send_to_char(g, chid, b"Virtual numbers must be between 0 and 65534.\r\n");
+        return;
+    }
     match buf[0].to_ascii_lowercase() {
         b'm' => {
             let Some(r_num) = g.world.real_mobile(num as Idx) else {
