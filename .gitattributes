@@ -1,1 +1,4 @@
 * -text
+
+# Keep integration tests in git checkouts, but omit them from release/source archives.
+/crates/*/tests export-ignore
