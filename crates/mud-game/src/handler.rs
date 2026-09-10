@@ -401,11 +401,64 @@ pub(crate) fn weight_gate_open(g: &Game, container: ObjId) -> bool {
     g.obj(container).values[0] > 0 || is_corpse(g, container)
 }
 
-/// obj_to_obj: put obj into container. Weight propagates up the
-/// chain and onto a carrying char ONLY when the immediate container's val0
-/// is > 0 — zero-capacity containers are weightless-unlimited, the deliberate
-/// 2007 feature (140fcc2). Quirk A2: INTENDED for containers; corpses are
-/// the B14 carve-out (honest accounting).
+/// Propagate a contents-weight delta, stopping at the first weightless container.
+fn adjust_contained_weight(g: &mut Game, mut container: ObjId, delta: i32) {
+    loop {
+        if !weight_gate_open(g, container) { return; }
+        g.obj_mut(container).weight += delta;
+        if let Some(up) = g.obj(container).in_obj {
+            container = up;
+        } else {
+            if let Some(carrier) = g.obj(container).carried_by {
+                g.ch_mut(carrier).carry_weight += delta;
+            }
+            return;
+        }
+    }
+}
+
+/// Mark the owning player's inventory or house for persistence.
+fn mark_object_changed(g: &mut Game, mut oid: ObjId) {
+    while let Some(up) = g.obj(oid).in_obj { oid = up; }
+    if let Some(chid) = g.obj(oid).carried_by.or(g.obj(oid).worn_by) {
+        if !g.ch(chid).is_npc() { g.ch_mut(chid).act.set(flags::PLR_CRASH); }
+    }
+    let room = g.obj(oid).in_room;
+    if room != NOWHERE && room_flagged(g, room, flags::ROOM_HOUSE) {
+        set_room_flag(g, room, flags::ROOM_HOUSE_CRASH);
+    }
+}
+
+/// Change weight in place without moving the item or firing acquisition quests.
+pub fn change_object_weight(g: &mut Game, oid: ObjId, delta: i32) {
+    let mut updates = Vec::new();
+    let mut current = oid;
+    let carrier = loop {
+        let Some(weight) = g.obj(current).weight.checked_add(delta) else {
+            g.log("SYSERR: Object weight change exceeds the supported range.".to_string());
+            return;
+        };
+        updates.push((current, weight));
+        if let Some(parent) = g.obj(current).in_obj {
+            if !weight_gate_open(g, parent) { break None; }
+            current = parent;
+        } else {
+            break g.obj(current).carried_by;
+        }
+    };
+    let carrier_update = if let Some(chid) = carrier {
+        let Some(weight) = g.ch(chid).carry_weight.checked_add(delta) else {
+            g.log("SYSERR: Carried weight change exceeds the supported range.".to_string());
+            return;
+        };
+        Some((chid, weight))
+    } else { None };
+    for (object, weight) in updates { g.obj_mut(object).weight = weight; }
+    if let Some((chid, weight)) = carrier_update { g.ch_mut(chid).carry_weight = weight; }
+    mark_object_changed(g, oid);
+}
+
+/// Put obj into container; each ancestor's weight gate applies independently.
 pub fn obj_to_obj(g: &mut Game, oid: ObjId, into: ObjId) {
     if oid == into {
         g.log("SYSERR: same source and target obj passed to obj_to_obj.".to_string());
@@ -417,21 +470,8 @@ pub fn obj_to_obj(g: &mut Game, oid: ObjId, into: ObjId) {
         let o = g.obj_mut(oid);
         o.in_obj = Some(into);
     }
-    // "Add weight to container, unless unlimited." — gate is the IMMEDIATE
-    // container's val0 only; outer containers then gain regardless.
-    if weight_gate_open(g, into) {
-        let mut tmp = into;
-        loop {
-            g.obj_mut(tmp).weight += w;
-            match g.obj(tmp).in_obj {
-                Some(up) => tmp = up,
-                None => break,
-            }
-        }
-        if let Some(carrier) = g.obj(tmp).carried_by {
-            g.ch_mut(carrier).carry_weight += w;
-        }
-    }
+    adjust_contained_weight(g, into, w);
+    mark_object_changed(g, into);
 }
 
 pub fn obj_from_obj(g: &mut Game, oid: ObjId) {
@@ -441,20 +481,8 @@ pub fn obj_from_obj(g: &mut Game, oid: ObjId) {
     };
     let w = obj_weight(g, oid);
     g.obj_mut(from).contains.retain(|o| *o != oid);
-    // Same val0 gate as obj_to_obj (checked on the container being left).
-    if weight_gate_open(g, from) {
-        let mut tmp = from;
-        loop {
-            g.obj_mut(tmp).weight -= w;
-            match g.obj(tmp).in_obj {
-                Some(up) => tmp = up,
-                None => break,
-            }
-        }
-        if let Some(carrier) = g.obj(tmp).carried_by {
-            g.ch_mut(carrier).carry_weight -= w;
-        }
-    }
+    adjust_contained_weight(g, from, -w);
+    mark_object_changed(g, from);
     g.obj_mut(oid).in_obj = None;
 }
 
