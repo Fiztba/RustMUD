@@ -72,6 +72,13 @@ fn object_insertion_does_not_renumber_products_in_shop_editor() {
     object.obj = Some(Box::new(g.world.obj_protos[0].clone()));
     oedit_save_internally(g, usize::MAX, &mut object);
     assert_eq!(g.olc[&di].shop.as_ref().unwrap().producing, products);
+    // Updating an existing object and then inserting another must be equally stable.
+    oedit_save_internally(g, usize::MAX, &mut object);
+    object.number = (1..NOTHING).find(|&v| g.world.real_object(v).is_none()).unwrap() as i32;
+    oedit_save_internally(g, usize::MAX, &mut object);
+    assert_eq!(g.olc[&di].shop.as_ref().unwrap().producing, products);
+    let produced: Vec<_> = g.shops_rt[0].producing.iter().map(|&r| g.world.obj_protos[r as usize].vnum as i32).collect();
+    assert_eq!(produced, products);
     let mut shop = g.olc.remove(&di).unwrap();
     shop.mode = SEDIT_CONFIRM_SAVESTRING;
     assert!(sedit_parse(g, di, shop, b"y").is_none());
