@@ -80,6 +80,23 @@ fn a_matching_object_reward_cannot_complete_the_same_quest_again() {
     assert_eq!(g.ch(ch).ps().questpoints, 7);
     assert_eq!(g.ch(ch).ps().completed_quests, vec![65000]);
     assert_eq!(g.ch(ch).carrying.len(), 2);
+
+    // Repeatable quests give one reward per completion and no history entry.
+    // A matching reward must not count toward the next stage either.
+    g.world.quests[0].flags = quest::AQ_REPEATABLE;
+    g.world.quests[0].next_quest = 65001;
+    g.world.quests.push(Quest {
+        vnum: 65001, type_: quest::AQ_OBJ_FIND, target, obj_out: 3,
+        next_quest: -1, ..Default::default()
+    });
+    quest::set_quest(g, ch, 0);
+    let found = mud_game::db::read_object(g, 0).unwrap();
+    mud_game::handler::obj_to_char(g, found, ch);
+    assert_eq!(g.ch(ch).ps().questpoints, 14);
+    assert_eq!(g.ch(ch).ps().completed_quests, vec![65000]);
+    assert_eq!(g.ch(ch).ps().current_quest, 65001);
+    assert_eq!(g.ch(ch).ps().quest_counter, 3);
+    assert_eq!(g.ch(ch).carrying.len(), 4);
 }
 
 
