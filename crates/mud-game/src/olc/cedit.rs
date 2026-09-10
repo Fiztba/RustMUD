@@ -223,10 +223,9 @@ fn str_udupnl(s: &[u8]) -> BStr {
     v
 }
 
-fn cedit_save_internally(g: &mut Game, di: usize, olc: &OlcData) -> bool {
+fn cedit_save_internally(g: &mut Game, olc: &OlcData) -> bool {
     let new = cfg(olc).clone();
     let Some(mortal) = g.real_room(new.mortal_start_room) else {
-        write_to_desc(g, di, b"The mortal start room no longer exists; choose a valid room before saving.\r\n");
         return false;
     };
     let immortal = g.real_room(new.immort_start_room).unwrap_or(mortal);
@@ -649,8 +648,9 @@ pub fn cedit_parse(
         CEDIT_CONFIRM_SAVESTRING => {
             match lower {
                 b'y' => {
-                    if !cedit_save_internally(g, di, &olc) {
+                    if !cedit_save_internally(g, &olc) {
                         cedit_disp_menu(g, di, &mut olc);
+                        write_to_desc(g, di, b"The mortal start room no longer exists; choose a valid room before saving.\r\n");
                         return Some(olc);
                     }
                     if let Some(chid) = g.descriptors.get(di).and_then(|d| d.character) {
