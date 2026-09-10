@@ -1641,6 +1641,24 @@ mod tests {
     }
 
     #[test]
+    fn unicode_substitutes_preserve_valid_scalars_and_ascii_fallbacks() {
+        for utf8 in [false, true] {
+            let mut p = ProtocolState::new();
+            p.set_number(Var::UTF_8, i64::from(utf8));
+            for cp in [0x41, 0x7f, 0x80, 0x7ff, 0x800, 0xd7ff, 0xe000, 0xffff, 0x10000, 0x10ffff] {
+                let mut bugs = Vec::new();
+                let input = format!("\t[U{cp}/ascii]");
+                let output = protocol_output(&mut p, input.as_bytes(), false, &mut bugs).unwrap();
+                let expected = if utf8 { char::from_u32(cp).unwrap().to_string().into_bytes() } else { b"ascii".to_vec() };
+                assert_eq!(output, expected, "{cp}");
+                assert!(bugs.is_empty());
+            }
+            let output = protocol_output(&mut p, b"a\t[U55296/]b\t[U1114112/backup]c", false, &mut Vec::new()).unwrap();
+            assert_eq!(output, b"abbackupc");
+        }
+    }
+
+    #[test]
     fn color_codes_render_ansi() {
         let mut p = state_with_colors(false);
         let mut bugs = Vec::new();
