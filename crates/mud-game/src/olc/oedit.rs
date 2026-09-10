@@ -1243,7 +1243,8 @@ pub fn oedit_parse(
                     .unwrap_or(0);
                 if level < LVL_IMPL {
                     let o = olc.obj.as_ref().unwrap();
-                    if o.affected.iter().any(|a| a.location == number) {
+                    let slot = olc.value.clamp(0, MAX_OBJ_AFFECT as i32 - 1) as usize;
+                    if o.affected.iter().enumerate().any(|(i, a)| i != slot && a.location == number - 1) {
                         write_to_desc(g, di, b"Object already has that apply.");
                         return Some(olc);
                     }
