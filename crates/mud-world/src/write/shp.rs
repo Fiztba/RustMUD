@@ -6,7 +6,7 @@
 //!
 //! Layout per shop: "#<vnum>~", producing vnums + "-1", the two profits as
 //! "%1.2f", buy-types as "%d%s" (keyword glued straight after the number,
-//! no space), "-1", the seven messages + temper/bitvector/keeper/with_who
+//! with a separating space for digit-leading keywords), "-1", the seven messages + temper/bitvector/keeper/with_who
 //! (this block alone passes through convert_from_tabs — parse_tab turns
 //! '\t' back into '@' except that a "\t\t" pair is left alone; \r is NOT
 //! stripped), rooms + "-1", and the four hours. NULL messages fall back to
@@ -87,10 +87,13 @@ pub fn write_file_fmt(world: &World, zone_rnum: u16, fmt: VnumFmt) -> Vec<u8> {
         push_profit(&mut out, shop.profit_buy);
         push_profit(&mut out, shop.profit_sell);
 
-        // "%d%s\n" — keyword glued directly after the type number.
+        // Keep the legacy compact form unless the keyword would extend the number.
         for t in &shop.type_list {
             push_i64(&mut out, t.type_ as i64);
             if let Some(k) = &t.keywords {
+                if k.first().is_some_and(u8::is_ascii_digit) {
+                    out.push(b' ');
+                }
                 out.extend_from_slice(k);
             }
             out.push(b'\n');
@@ -160,6 +163,23 @@ mod tests {
     use super::*;
     use crate::model::{Shop, ShopBuyData, World, Zone};
     use crate::parse;
+
+    #[test]
+    fn digit_leading_keywords_survive_reload() {
+        let mut world = World::default();
+        world.zones.push(Zone { number: 0, bot: 0, top: 99, ..Default::default() });
+        world.shops.push(Shop {
+            vnum: 5,
+            type_list: vec![ShopBuyData { type_: 5, keywords: Some(b"2hand | sword".to_vec()) }],
+            ..Default::default()
+        });
+        let bytes = write_file(&world, 0);
+        let mut loaded = World::default();
+        parse::shp::parse_file(&mut loaded, &bytes, "test.shp").unwrap();
+        assert_eq!(loaded.shops[0].type_list.len(), 1);
+        assert_eq!(loaded.shops[0].type_list[0].type_, 5);
+        assert_eq!(loaded.shops[0].type_list[0].keywords.as_deref(), Some(b"2hand | sword".as_slice()));
+    }
 
     #[test]
     fn empty_zone_writes_header_and_terminator() {
