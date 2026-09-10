@@ -1275,6 +1275,7 @@ pub fn do_eat(g: &mut Game, chid: CharId, argument: &[u8], cmd: usize, subcmd: i
 
 /// do_pour — also fill via subcmd.
 pub fn do_pour(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd: i32) {
+    let original_room = g.ch(chid).in_room;
     let (arg1, arg2, _) = two_arguments(argument);
     let mut from_obj: Option<ObjId> = None;
     let mut to_obj: Option<ObjId> = None;
@@ -1408,6 +1409,8 @@ pub fn do_pour(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd:
         comm::act_full(g, b"$n gently fills $p from $P.", true, Some(chid), Some(to_obj), comm::ActArg::Obj(from_obj), comm::TO_ROOM);
     }
     if item_location(g, from_obj) != from_location || item_location(g, to_obj) != to_location { return; }
+    if !g.try_ch(chid).is_some_and(|ch| ch.in_room == original_room
+        && !ch.plr(flags::PLR_NOTDEADYET) && !ch.mob_flagged(flags::MOB_NOTDEADYET)) { return; }
     // New alias.
     if empty_drink_container(g, to_obj) {
         name_to_drinkcon(g, to_obj, g.obj(from_obj).values[2]);
