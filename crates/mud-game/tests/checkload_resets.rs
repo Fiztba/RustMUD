@@ -83,3 +83,24 @@ fn checkload_uses_room_trigger_destination_and_ignores_remove_commands() {
     let output = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
     assert!(!output.contains("(zedit)"), "{output}");
 }
+
+#[test]
+fn trigger_diagnostics_clear_targets_at_reset_boundaries() {
+    let mut f = fixture("boundaries");
+    let g = &mut f.game;
+    let ch = player(g, b"Builder", 12345);
+    let di = descriptor(g, ch, ConState::Playing);
+    for z in &mut g.world.zones { z.cmds.clear(); }
+    for (load, kind) in [(b'M', mud_game::dg::MOB_TRIGGER), (b'O', mud_game::dg::OBJ_TRIGGER)] {
+        for boundary in [None, Some(b'R'), Some(b'D')] {
+            let mut cmds = vec![command(load, 0, 1, 2)];
+            if let Some(boundary) = boundary { cmds.push(command(boundary, 0, 0, 0)); }
+            cmds.push(command(b'T', kind, 0, 0));
+            g.world.zones[0].cmds = cmds;
+            g.descriptors.get_mut(di).unwrap().output.clear();
+            do_checkloadstatus(g, ch, format!("t {}", g.world.triggers[0].vnum).as_bytes(), 0, 0);
+            let output = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
+            assert_eq!(output.contains("zedit room"), boundary.is_none(), "{output}");
+        }
+    }
+}
