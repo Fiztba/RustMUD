@@ -9,7 +9,7 @@ use mud_data::types::*;
 use mud_world::model::MobProto;
 
 use crate::db::{
-    add_to_save_list, in_save_list, remove_from_save_list, write_world_file, SL_MOB, SL_ZON,
+    add_to_save_list, in_save_list, remove_from_save_list, write_world_file, SL_MOB, SL_SHP, SL_ZON,
 };
 use crate::game::{Game, MudlogKind};
 
@@ -142,7 +142,12 @@ fn extract_mobile_all(g: &mut Game, vnum: Idx) {
             })
             .unwrap_or(false);
         if is_target {
-            crate::handler::extract_char(g, id);
+            if !g.ch(id).mob_flagged(mud_data::flags::MOB_NOTDEADYET) {
+                crate::handler::extract_char(g, id);
+            }
+            // The prototype and its count disappear now; final extraction
+            // must not decrement a different prototype after the shift.
+            g.ch_mut(id).mob_rnum = NOBODY;
         }
     }
 }
@@ -176,33 +181,15 @@ pub fn delete_mobile(g: &mut Game, refpt: Idx) -> Option<Idx> {
     // Live mobile rnums.
     for id in g.character_list.clone() {
         if let Some(c) = g.chars.get_mut(id) {
-            if c.mob_rnum >= refpt && c.mob_rnum != NOBODY {
+            if c.mob_rnum > refpt && c.mob_rnum != NOBODY {
                 c.mob_rnum -= 1;
             }
         }
     }
-    // Zone 'M' commands: the ones loading this mob are removed outright.
-    // Advance past the shifted-in command after a delete. B26: the
-    // zones whose tables change here need writing back out too.
-    let mut touched: Vec<Idx> = Vec::new();
-    for zi in 0..g.world.zones.len() {
-        let mut ci = 0usize;
-        let mut zone_touched = false;
-        while ci < g.world.zones[zi].cmds.len() {
-            let cmd = &mut g.world.zones[zi].cmds[ci];
-            if cmd.command == b'M' {
-                if cmd.arg1 == refpt as i32 {
-                    g.world.zones[zi].cmds.remove(ci);
-                    zone_touched = true;
-                } else if cmd.arg1 > refpt as i32 {
-                    cmd.arg1 -= 1;
-                    zone_touched = true;
-                }
-            }
-            ci += 1;
-        }
-        if zone_touched {
-            touched.push(g.world.zones[zi].number);
+    let mut touched = Vec::new();
+    for zone in &mut g.world.zones {
+        if crate::olc::genzon::remove_prototype_resets(zone, refpt, true) {
+            touched.push(zone.number);
         }
     }
     for zvnum in touched {
@@ -210,8 +197,25 @@ pub fn delete_mobile(g: &mut Game, refpt: Idx) -> Option<Idx> {
     }
     // Shop keepers.
     for s in g.shops_rt.iter_mut() {
-        if s.keeper >= refpt && s.keeper != NOBODY {
+        if s.keeper == refpt {
+            s.keeper = NOBODY;
+            s.func = None;
+        } else if s.keeper > refpt && s.keeper != NOBODY {
             s.keeper -= 1;
+        }
+    }
+
+    // Keep the file-side shop references consistent with their runtime rows.
+    let mut changed_shops = Vec::new();
+    for shop in &mut g.world.shops {
+        if shop.keeper_vnum == vnum as i32 {
+            shop.keeper_vnum = NOBODY as i32;
+            changed_shops.push(shop.vnum);
+        }
+    }
+    for shop_vnum in changed_shops {
+        if let Some(zone) = crate::dg::mobcmd::real_zone_by_thing(g, shop_vnum as i32) {
+            add_to_save_list(g, g.world.zones[zone].number, SL_SHP);
         }
     }
 
