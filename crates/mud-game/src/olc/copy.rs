@@ -185,8 +185,11 @@ pub fn do_dig(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd:
         return;
     }
 
-    let rawvnum = atoi(&sroom);
-    // (room_vnum)rawvnum: the cast truncates, and -1 becomes NOWHERE.
+    let rawvnum = std::str::from_utf8(&sroom).ok().and_then(|s| s.parse::<i32>().ok());
+    let Some(rawvnum) = rawvnum.filter(|&n| n == -1 || (0..NOWHERE as i32).contains(&n)) else {
+        send_to_char(g, chid, b"Room number must be -1 to remove an exit, or between 0 and 65534.\r\n");
+        return;
+    };
     let rvnum: u16 = if rawvnum == -1 { NOWHERE } else { rawvnum as u16 };
     let mut rrnum = g.world.real_room(rvnum).unwrap_or(NOWHERE);
     let dir = search_block(&sdir, &DIRS);
