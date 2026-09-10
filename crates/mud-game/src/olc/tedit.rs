@@ -124,6 +124,13 @@ pub fn do_tedit(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcm
         return;
     }
 
+    if g.descriptors.order.iter().any(|&other|
+        g.descriptors.get(other).is_some_and(|d| d.state == ConState::Tedit)
+            && crate::olc::olc_of(g, other).is_some_and(|o| o.number == l as i32)) {
+        send_to_char(g, chid, b"That text file is already being edited.\r\n");
+        return;
+    }
+
     clear_screen(g, di);
     send_editor_help(g, chid);
     send_to_char(g, chid, b"Edit file below:\r\n\r\n");
@@ -179,13 +186,14 @@ pub fn tedit_string_cleanup(
     if saved {
         let idx = olc.number as usize;
         let path = std::path::PathBuf::from(String::from_utf8_lossy(&storage.unwrap()).into_owned());
-        let mut body = text.unwrap_or_default();
+        let terminal_text = text.unwrap_or_default();
+        let mut body = terminal_text.clone();
         body.retain(|&b| b != b'\r');
         if std::fs::write(&path, &body).is_err() {
             let msg = format!("SYSERR: Can't write file '{}'.", path.display());
             g.mudlog(MudlogKind::Cmp, LVL_IMPL, true, &msg);
         } else {
-            set_buffer(g, idx, body);
+            set_buffer(g, idx, terminal_text);
             if let Some(chid) = chid {
                 let name = String::from_utf8_lossy(g.ch(chid).get_name()).into_owned();
                 let level = (LVL_GOD as i16).max(g.ch(chid).invis_lev()) as u8;
@@ -204,9 +212,6 @@ pub fn tedit_string_cleanup(
         write_to_desc(g, di, b"Edit aborted.\r\n");
         if let Some(chid) = chid {
             act(g, b"$n stops editing some scrolls.", true, Some(chid), None, None, TO_ROOM);
-        }
-        if let Some(t) = text {
-            set_buffer(g, olc.number as usize, t);
         }
     }
 
