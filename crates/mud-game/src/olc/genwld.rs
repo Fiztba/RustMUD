@@ -40,16 +40,12 @@ fn shift_room_events(g: &mut Game, from: RoomRnum, delta: i32) {
             _ => {}
         }
     }
-    let owners: Vec<EventOwner> = g.event_lists.iter().copied().collect();
-    for o in owners {
-        if let EventOwner::Room(r) = o {
-            let n = bump(r);
-            if n != r {
-                g.event_lists.remove(&o);
-                g.event_lists.insert(EventOwner::Room(n));
-            }
-        }
-    }
+    // Rebuild at once: in-place remove/insert can erase a just-shifted owner
+    // when two adjacent rooms have event lists.
+    g.event_lists = g.event_lists.drain().map(|owner| match owner {
+        EventOwner::Room(r) => EventOwner::Room(bump(r)),
+        other => other,
+    }).collect();
 }
 
 /// add_room. Returns the rnum the room landed at, or
@@ -187,9 +183,8 @@ pub fn add_room(g: &mut Game, room: &Room, light: i32) -> Option<RoomRnum> {
     }
 
     // World exits, the new room's own included.
-    let dirs = crate::fight::dir_count(g);
     for r in g.world.rooms.iter_mut() {
-        for ex in r.dir_option.iter_mut().take(dirs) {
+        for ex in r.dir_option.iter_mut() {
             if let Some(ex) = ex {
                 if ex.to_room != NOWHERE && ex.to_room as usize >= found {
                     ex.to_room += 1;
@@ -279,9 +274,8 @@ pub fn delete_room(g: &mut Game, rnum: RoomRnum) -> bool {
     g.event_lists.remove(&EventOwner::Room(rnum));
 
     // Exits: retarget or drop, and shift the ones above.
-    let dirs = crate::fight::dir_count(g);
     for r in g.world.rooms.iter_mut() {
-        for slot in r.dir_option.iter_mut().take(dirs) {
+        for slot in r.dir_option.iter_mut() {
             let Some(ex) = slot else { continue };
             if ex.to_room != NOWHERE && ex.to_room > rnum {
                 ex.to_room -= 1;

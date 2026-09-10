@@ -242,12 +242,9 @@ fn exit_field_unset(text: Option<&[u8]>) -> bool {
 }
 
 pub fn redit_save_internally(g: &mut Game, di: usize, olc: &mut OlcData) {
-    let mut new_room = false;
+    let new_room = g.real_room(olc.number).is_none();
     {
         let room = olc.room.as_mut().expect("redit without a room");
-        if room.vnum == NOWHERE {
-            new_room = true;
-        }
         room.vnum = olc.number as Idx;
         room.zone = olc.zone_num as ZoneRnum;
 
@@ -278,7 +275,7 @@ pub fn redit_save_internally(g: &mut Game, di: usize, olc: &mut OlcData) {
         }
     }
     let room = olc.room.as_ref().unwrap().as_ref().clone();
-    let Some(room_num) = add_room(g, &room, olc.room_light) else {
+    let Some(room_num) = add_room(g, &room, 0) else {
         write_to_desc(g, di, b"Something went wrong...\r\n");
         g.log(format!("SYSERR: redit_save_internally: Something failed! ({})", NOWHERE));
         return;
@@ -294,9 +291,7 @@ pub fn redit_save_internally(g: &mut Game, di: usize, olc: &mut OlcData) {
         return;
     }
 
-    // Every other builder's in-progress copy shifts with the table
-    // Note zedit's 'D' case bumps arg2 as well — a
-    // door direction, not a room rnum — and then falls through to arg1.
+    // Every other builder's in-progress room reference shifts with the table.
     let others: Vec<usize> = g.descriptors.order.clone();
     for dsc in others {
         if dsc == di {
@@ -310,20 +305,12 @@ pub fn redit_save_internally(g: &mut Game, di: usize, olc: &mut OlcData) {
                 for cmd in zone.cmds.iter_mut() {
                     match cmd.command {
                         b'O' | b'M' | b'T' | b'V' => {
-                            if cmd.arg3 >= room_num as i32 {
+                            if cmd.arg3 != NOWHERE as i32 && cmd.arg3 >= room_num as i32 {
                                 cmd.arg3 += 1;
                             }
                         }
-                        b'D' => {
-                            if cmd.arg2 >= room_num as i32 {
-                                cmd.arg2 += 1;
-                            }
-                            if cmd.arg1 >= room_num as i32 {
-                                cmd.arg1 += 1;
-                            }
-                        }
-                        b'R' => {
-                            if cmd.arg1 >= room_num as i32 {
+                        b'D' | b'R' => {
+                            if cmd.arg1 != NOWHERE as i32 && cmd.arg1 >= room_num as i32 {
                                 cmd.arg1 += 1;
                             }
                         }
@@ -335,7 +322,7 @@ pub fn redit_save_internally(g: &mut Game, di: usize, olc: &mut OlcData) {
                 let Some(room) = olc_other.room.as_mut() else { continue };
                 for ex in room.dir_option.iter_mut() {
                     if let Some(ex) = ex {
-                        if ex.to_room >= room_num {
+                        if ex.to_room != NOWHERE && ex.to_room >= room_num {
                             ex.to_room += 1;
                         }
                     }
