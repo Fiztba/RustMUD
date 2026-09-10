@@ -105,9 +105,31 @@ fn received_letters_are_independent_of_world_prototypes() {
     assert_eq!(g.obj(restored).action_description, body);
     assert_eq!(g.obj(restored).weight, 1);
     assert_eq!(g.obj(restored).cost_per_day, 10);
+    assert!(g.obj(restored).script.is_none());
     assert!(!objsave::crash_is_unrentable(g, restored));
-    handler::extract_obj(g, restored);
-    assert_eq!(g.obj_counts, counts);
+    handler::obj_to_char(g, restored, ch);
+    objsave::crash_rentsave(g, ch, 0);
+    assert!(g.ch(ch).carrying.is_empty());
+    objsave::crash_load(g, ch);
+    assert_eq!(g.ch(ch).carrying.len(), 1);
+    let rented = g.ch(ch).carrying[0];
+    assert_eq!(g.obj(rented).action_description, body);
+    assert_eq!(g.obj(rented).item_number, NOTHING);
+    // Explicit nonrent flags and negative rent must still take precedence.
+    g.obj_mut(rented).extra_flags.set(flags::ITEM_NORENT);
+    assert!(objsave::crash_is_unrentable(g, rented));
+    g.obj_mut(rented).extra_flags.remove(flags::ITEM_NORENT);
+    g.obj_mut(rented).cost_per_day = -1;
+    assert!(objsave::crash_is_unrentable(g, rented));
+    g.obj_mut(rented).cost_per_day = 10;
+    g.obj_mut(rented).type_flag = flags::ITEM_TREASURE;
+    assert!(objsave::crash_is_unrentable(g, rented));
+    let last_proto = (g.world.obj_protos.len() - 1) as u16;
+    mud_game::olc::genobj::delete_object(g, last_proto).unwrap();
+    assert_eq!(g.obj(rented).item_number, NOTHING);
+    let counts_after_edit = g.obj_counts.clone();
+    handler::extract_obj(g, rented);
+    assert_eq!(g.obj_counts, counts_after_edit);
 }
 
 #[cfg(windows)]
