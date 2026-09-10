@@ -412,7 +412,15 @@ fn trade_with(g: &mut Game, oid: ObjId, shop_idx: usize) -> TradeResult {
 /// same_obj between two instances.
 pub fn same_obj(g: &Game, a: ObjId, b: ObjId) -> bool {
     let (o1, o2) = (g.obj(a), g.obj(b));
-    if o1.item_number != o2.item_number || o1.cost != o2.cost {
+    if o1.item_number != o2.item_number || o1.cost != o2.cost
+        || o1.values != o2.values || o1.type_flag != o2.type_flag
+        || o1.extra_flags != o2.extra_flags || o1.wear_flags != o2.wear_flags
+        || o1.perm_affects != o2.perm_affects || o1.weight != o2.weight
+        || o1.level != o2.level || o1.timer != o2.timer || o1.cost_per_day != o2.cost_per_day
+        || o1.name != o2.name || o1.short_description != o2.short_description
+        || o1.description != o2.description || o1.action_description != o2.action_description
+        || o1.ex_descriptions.is_some() || o2.ex_descriptions.is_some()
+        || !o1.contains.is_empty() || !o2.contains.is_empty() {
         return false;
     }
     for i in 0..MAX_OBJ_AFFECT {
@@ -434,7 +442,13 @@ fn same_as_proto(g: &Game, oid: ObjId, rnum: Idx) -> bool {
     let Some(proto) = g.world.obj_protos.get(rnum as usize) else {
         return false;
     };
-    if o.cost != proto.cost {
+    if o.cost != proto.cost || o.values != proto.values || o.type_flag != proto.type_flag
+        || o.extra_flags.0 != proto.extra_flags || o.wear_flags.0 != proto.wear_flags
+        || o.perm_affects.0 != proto.perm_affects || o.weight != proto.weight
+        || o.level != proto.level || o.timer != proto.timer || o.cost_per_day != proto.cost_per_day
+        || o.name.is_some() || o.short_description.is_some() || o.description.is_some()
+        || o.action_description.is_some() || o.ex_descriptions.is_some()
+        || !o.contains.is_empty() {
         return false;
     }
     for i in 0..MAX_OBJ_AFFECT {
