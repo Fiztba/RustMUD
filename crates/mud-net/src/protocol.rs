@@ -230,6 +230,8 @@ pub struct ProtocolState {
     pub vars: Vec<MsdpVal>,
     /// Per-descriptor subneg accumulator (see module doc for the F2 fix).
     iac_buf: Vec<u8>,
+    /// Partial ESC[digit z client tag, retained across socket reads.
+    mxp_buf: Vec<u8>,
     /// An IAC or option command awaiting its next byte from the stream.
     iac_pending: bool,
     option_pending: Option<u8>,
@@ -284,6 +286,7 @@ impl ProtocolState {
             last_ttype: None,
             vars,
             iac_buf: Vec::new(),
+            mxp_buf: Vec::new(),
             iac_pending: false,
             option_pending: None,
             out: Vec::new(),
@@ -419,7 +422,9 @@ pub fn protocol_input(p: &mut ProtocolState, data: &[u8], output_empty: bool) ->
         if p.iac_pending {
             p.iac_pending = false;
             match b {
-                IAC => r.in_band.push(IAC),
+                IAC => {
+                    if !process_mxp_byte(p, IAC, &mut r, output_empty) { return r; }
+                }
                 SB => {
                     p.iac_mode = true;
                     p.iac_buf.clear();
@@ -435,38 +440,49 @@ pub fn protocol_input(p: &mut ProtocolState, data: &[u8], output_empty: bool) ->
             i += 1;
             continue;
         }
-        if b == 0x1B && i + 2 < data.len() && data[i + 1] == b'[' && data[i + 2].is_ascii_digit() {
-            // Client-side MXP tag: ESC [ <digit> z <tag> >.
-            if i + 3 < data.len() && data[i + 3] == b'z' {
-                let mut j = i + 4;
-                let mut tag = Vec::new();
-                let mut hit_end = false;
-                while j < data.len() && tag.len() < 1000 {
-                    if data[j] == b'>' {
-                        hit_end = true;
-                        break;
-                    }
-                    tag.push(data[j]);
-                    j += 1;
-                }
-                if hit_end {
-                    parse_client_mxp_tag(p, &tag, output_empty);
-                    i = j + 1;
-                    continue;
-                }
-                // No terminator in this read: drop the ESC and continue —
-                // a tag fragmented across reads cannot be recovered.
-                i += 1;
-                continue;
-            }
-            r.in_band.push(b);
-            i += 1;
-            continue;
-        }
-        r.in_band.push(b);
+        if !process_mxp_byte(p, b, &mut r, output_empty) { return r; }
         i += 1;
     }
     r
+}
+
+/// Process a decoded data byte, including an escaped Telnet IAC.
+fn process_mxp_byte(p: &mut ProtocolState, b: u8, r: &mut InputResult, output_empty: bool) -> bool {
+    if !p.mxp_buf.is_empty() {
+        let len = p.mxp_buf.len();
+        if len >= 4 {
+            if b == b'>' {
+                let tag = std::mem::take(&mut p.mxp_buf);
+                parse_client_mxp_tag(p, &tag[4..], output_empty);
+            } else if len >= 1004 {
+                r.bugs.push("MXP client tag exceeds 1000 bytes.".to_string());
+                r.fatal = true;
+                return false;
+            } else {
+                p.mxp_buf.push(b);
+            }
+            return true;
+        }
+        let matches_prefix = match len {
+            1 => b == b'[',
+            2 => b.is_ascii_digit(),
+            3 => b == b'z',
+            _ => unreachable!(),
+        };
+        if matches_prefix {
+            p.mxp_buf.push(b);
+            return true;
+        }
+        // An ordinary escape sequence belongs to command input. Process
+        // this byte again so an adjacent ESC can start a fresh candidate.
+        r.in_band.append(&mut p.mxp_buf);
+    }
+    if b == 0x1B {
+        p.mxp_buf.push(b);
+        return true;
+    }
+    r.in_band.push(b);
+    true
 }
 
 /// Apply the same limit to ordinary and escaped subnegotiation bytes.
@@ -1571,6 +1587,91 @@ mod tests {
         }
         assert!(protocol_input(&mut p, &[IAC, IAC], true).fatal);
         assert_eq!(p.iac_buf.len(), mud_data::types::MAX_RAW_INPUT_LENGTH);
+    }
+
+    #[test]
+    fn mxp_client_tags_survive_every_read_boundary() {
+        let wire = b"look\n\x1b[1z<VERSION CLIENT=MUSHCLIENT VERSION=5.06 MXP=1.0>say hi\n";
+        for split in 0..=wire.len() {
+            let mut p = ProtocolState::new();
+            let mut input = protocol_input(&mut p, &wire[..split], true).in_band;
+            input.extend(protocol_input(&mut p, &wire[split..], true).in_band);
+            assert_eq!(input, b"look\nsay hi\n", "split {split}");
+            assert_eq!(p.var_str(Var::CLIENT_ID), b"MUSHCLIENT", "split {split}");
+            assert_eq!(p.var_str(Var::CLIENT_VERSION), b"5.06");
+            assert_eq!(p.mxp_version, b"1.0");
+        }
+    }
+
+    #[test]
+    fn mxp_candidates_preserve_non_mxp_escapes() {
+        for wire in [b"a\x1bx\n".as_slice(), b"\x1b[A\x1b[31mred\x1b[0m\n", b"\x1b\x1b[2z<CLIENT=CMUD>look\n"] {
+            let expected = if wire.starts_with(b"\x1b\x1b") { b"\x1blook\n".as_slice() } else { wire };
+            for split in 0..=wire.len() {
+                let mut p = ProtocolState::new();
+                let mut input = protocol_input(&mut p, &wire[..split], true).in_band;
+                input.extend(protocol_input(&mut p, &wire[split..], true).in_band);
+                assert_eq!(input, expected, "split {split}");
+                assert!(p.mxp_buf.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn mxp_bytewise_tags_are_isolated_and_allow_telnet_negotiation() {
+        let mut p = ProtocolState::new();
+        let mut other = ProtocolState::new();
+        let wire = b"\x1b[1z<CLIENT=CMUD>\x1b[1z<MXP=1.0>look\n";
+        let mut input = Vec::new();
+        for &byte in wire {
+            let result = protocol_input(&mut p, &[byte], true);
+            assert!(!result.fatal);
+            input.extend(result.in_band);
+            assert!(protocol_input(&mut p, &[IAC, WILL, TELOPT_NAWS], true).in_band.is_empty());
+            assert_eq!(protocol_input(&mut other, b"say hi\n", true).in_band, b"say hi\n");
+            assert!(other.mxp_buf.is_empty());
+        }
+        assert_eq!(input, b"look\n");
+        assert_eq!(p.var_str(Var::CLIENT_ID), b"CMUD");
+        assert_eq!(p.mxp_version, b"1.0");
+        assert!(p.naws);
+    }
+
+    #[test]
+    fn mxp_tag_buffer_is_bounded() {
+        for size in [999, 1000, 1001] {
+            let mut wire = b"\x1b[1z".to_vec();
+            wire.extend(vec![b'x'; size]);
+            wire.extend_from_slice(b">look\n");
+            for chunk_size in [1, 17, wire.len()] {
+                let mut p = ProtocolState::new();
+                let mut input = Vec::new();
+                let mut fatal = false;
+                for chunk in wire.chunks(chunk_size) {
+                    let result = protocol_input(&mut p, chunk, true);
+                    input.extend(result.in_band);
+                    assert!(p.mxp_buf.len() <= 1004);
+                    if result.fatal { fatal = true; break; }
+                }
+                assert_eq!(fatal, size > 1000);
+                if !fatal { assert_eq!(input, b"look\n"); }
+            }
+        }
+    }
+
+    #[test]
+    fn escaped_telnet_data_obeys_mxp_framing() {
+        for (wire, expected) in [
+            (b"\x1b[1z<CLIENT=CMUD\xff\xff>look\n".as_slice(), b"look\n".as_slice()),
+            (b"\x1b\xff\xffx\n".as_slice(), b"\x1b\xffx\n".as_slice()),
+        ] {
+            for split in 0..=wire.len() {
+                let mut p = ProtocolState::new();
+                let mut input = protocol_input(&mut p, &wire[..split], true).in_band;
+                input.extend(protocol_input(&mut p, &wire[split..], true).in_band);
+                assert_eq!(input, expected, "split {split}");
+            }
+        }
     }
 
     #[test]
