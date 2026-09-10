@@ -8,13 +8,10 @@
 //! -1, "value[0..4] returnmob quantity" (returnmob's 65535 becomes -1),
 //! "gold exp obj_reward" with obj_reward RAW (an unset reward stays 65535,
 //! as it is on disk), and "S". The whole record passes through
-//! convert_from_tabs (parse_tab: '\t'->'@' except "\t\t" pairs). Records
-//! of MAX_STRING_LENGTH or more are skipped. File tail "$~\n".
+//! convert_from_tabs (parse_tab: '\t'->'@' except "\t\t" pairs). File tail "$~\n".
 
 use super::{sprintascii, VnumFmt};
 use crate::model::World;
-
-const MAX_STRING_LENGTH: usize = 49152;
 
 /// See write::shp for the mirror-of-parse_at quirk.
 fn parse_tab(s: &mut [u8]) {
@@ -127,11 +124,8 @@ pub fn write_file_fmt(world: &World, zone_rnum: u16, fmt: VnumFmt) -> Vec<u8> {
         rec.push(b'\n');
         rec.extend_from_slice(b"S\n");
 
-        // if (n < MAX_STRING_LENGTH) write; else skip with a SYSERR.
-        if rec.len() < MAX_STRING_LENGTH {
-            parse_tab(&mut rec);
-            out.extend_from_slice(&rec);
-        }
+        parse_tab(&mut rec);
+        out.extend_from_slice(&rec);
     }
 
     out.extend_from_slice(b"$~\n");
@@ -145,6 +139,24 @@ mod tests {
     use super::*;
     use crate::model::{Quest, World, Zone};
     use crate::parse;
+
+    #[test]
+    fn large_parsed_quest_record_survives_saving() {
+        let mut input = b"#7\nQuest~\n".to_vec();
+        for letter in b"diuq" { input.extend([vec![*letter; 79], vec![b'\n']].concat().repeat(210)); input.extend_from_slice(b"~\n"); }
+        input.extend_from_slice(b"3 -1 0 -1 -1 -1 -1\n10 0 1 34 60 -1 2\n5 0 65535\nS\n$~\n");
+        let mut before = World::default();
+        before.zones.push(Zone { number: 0, bot: 0, top: 99, ..Default::default() });
+        parse::qst::parse_file(&mut before, &input, "large.qst").unwrap();
+        let saved = write_file(&before, 0);
+        let mut after = World::default();
+        parse::qst::parse_file(&mut after, &saved, "saved.qst").unwrap();
+        assert_eq!(after.quests.len(), 1);
+        assert!(after.quests[0].desc == before.quests[0].desc);
+        assert!(after.quests[0].info == before.quests[0].info);
+        assert!(after.quests[0].done == before.quests[0].done);
+        assert!(after.quests[0].quit == before.quests[0].quit);
+    }
 
     #[test]
     fn empty_zone_writes_bare_terminator() {

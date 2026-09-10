@@ -5,7 +5,7 @@
 //! raw.
 
 use mud_data::flags::{EX_HIDDEN, EX_ISDOOR, EX_PICKPROOF};
-use mud_data::types::{MAX_STRING_LENGTH, NOTHING, NOWHERE};
+use mud_data::types::{NOTHING, NOWHERE};
 
 use crate::model::World;
 use crate::write::{push_int, VnumFmt};
@@ -72,11 +72,6 @@ pub fn write_file_fmt(world: &World, zone_rnum: u16, fmt: VnumFmt) -> Vec<u8> {
             )
             .as_bytes(),
         );
-        if buf2.len() >= MAX_STRING_LENGTH {
-            // A room whose record does not fit is skipped whole.
-            // Unreachable for anything that parsed.
-            continue;
-        }
         parse_tab(&mut buf2);
         out.extend_from_slice(&buf2);
 
@@ -163,6 +158,21 @@ mod tests {
         let rnum = w.rooms.len() as u16;
         w.room_map.insert(room.vnum, rnum);
         w.rooms.push(room);
+    }
+
+    #[test]
+    fn large_parsed_room_header_survives_saving() {
+        let mut input = b"#1200\n".to_vec();
+        input.extend([vec![b'n'; 79], vec![b'\n']].concat().repeat(400)); input.extend_from_slice(b"~\n");
+        input.extend([vec![b'd'; 79], vec![b'\n']].concat().repeat(400)); input.extend_from_slice(b"~\n12 0 0 0 0 0\nS\n$~\n");
+        let mut before = tiny_world();
+        crate::parse::wld::parse_file(&mut before, &input, "large.wld").unwrap();
+        let saved = write_file(&before, 0);
+        let mut after = tiny_world();
+        crate::parse::wld::parse_file(&mut after, &saved, "saved.wld").unwrap();
+        assert_eq!(after.rooms.len(), 1);
+        assert!(after.rooms[0].name == before.rooms[0].name);
+        assert!(after.rooms[0].description == before.rooms[0].description);
     }
 
     #[test]
