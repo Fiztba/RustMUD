@@ -75,6 +75,10 @@ fn broadcast_survives_an_object_purged_by_its_first_listener() {
     g.rooms[0].people = [first, second, viewer, actor].into_iter().collect();
     let mut o = mud_game::obj::create_obj(); o.name = Some(b"gem".to_vec()); o.short_description = Some(b"a gem".to_vec());
     let oid = g.objs.insert(o); obj_to_room(g, oid, 0);
+    comm::act_full(g, b"$n holds $p.", false, Some(actor), Some(oid), ActArg::None, comm::TO_ROOM | comm::DG_NO_TRIG);
+    assert!(g.try_obj(oid).is_some());
+    assert!(g.script_of(GoId::Char(second)).unwrap().global_vars.is_empty());
+    g.descriptors.get_mut(di).unwrap().output.clear();
     comm::act_full(g, b"$n holds $p.", false, Some(actor), Some(oid), ActArg::None, comm::TO_ROOM);
     assert!(g.try_obj(oid).is_none());
     assert!(String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output).contains("Actor holds a gem."));
@@ -94,3 +98,33 @@ fn nested_say_does_not_disable_remaining_broadcast_triggers() {
 }
 
 
+
+#[test]
+fn victim_object_rendering_survives_purge_and_recipient_filters_hold() {
+    let mut f = fixture("victim"); let g = &mut f.game;
+    let actor = player(g, b"Actor", 12345); let viewer = player(g, b"Viewer", 12346);
+    for ch in [actor, viewer] { g.ch_mut(ch).position = POS_STANDING; char_to_room(g, ch, 0); }
+    let actor_di = descriptor(g, actor, ConState::Playing);
+    let di = descriptor(g, viewer, ConState::Playing); g.rooms[0].light = 1;
+    let first = listener(g, &[b"mpurge gem"]);
+    let second = listener(g, &[b"set received yes", b"global received"]);
+    g.rooms[0].people = [first, second, viewer, actor].into_iter().collect();
+    let mut o = mud_game::obj::create_obj(); o.name = Some(b"gem".to_vec()); o.short_description = Some(b"a gem".to_vec());
+    let oid = g.objs.insert(o); obj_to_room(g, oid, 0);
+    comm::act_full(g, b"$n holds $P.", false, Some(actor), None, ActArg::Obj(oid), comm::TO_ROOM);
+    assert!(g.try_obj(oid).is_none());
+    assert!(String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output).contains("Actor holds a gem."));
+    assert!(g.descriptors.get(actor_di).unwrap().output.is_empty());
+    assert!(g.script_of(GoId::Char(second)).unwrap().global_vars.iter().any(|v| v.name == b"received"));
+    g.descriptors.get_mut(di).unwrap().output.clear();
+    comm::act(g, b"hidden", false, Some(actor), None, Some(viewer), comm::TO_NOTVICT);
+    assert!(g.descriptors.get(di).unwrap().output.is_empty());
+    g.ch_mut(viewer).position = POS_SLEEPING;
+    comm::act(g, b"awake only", false, Some(actor), None, None, comm::TO_ROOM);
+    assert!(g.descriptors.get(di).unwrap().output.is_empty());
+    comm::act(g, b"sleepers too", false, Some(actor), None, None, comm::TO_ROOM | comm::TO_SLEEP);
+    assert!(String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output).contains("Sleepers too"));
+    assert!(g.dg_act_check);
+    comm::act(g, b"", false, None, None, None, comm::TO_ROOM | comm::DG_NO_TRIG);
+    assert!(g.dg_act_check);
+}

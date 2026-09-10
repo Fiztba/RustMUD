@@ -178,7 +178,7 @@ pub fn boot_game(lib_dir: std::path::PathBuf, flags: BootFlags, seed: i64, now: 
         trig_line_state: Default::default(),
         dg_script_depth: 0,
         dg_owner_purged: false,
-        dg_act_check: false,
+        dg_act_check: true,
         log_lines,
         socials,
         commands: Vec::new(),
