@@ -86,3 +86,46 @@ fn object_insertion_does_not_renumber_products_in_shop_editor() {
     let produced: Vec<_> = g.shops_rt[0].producing.iter().map(|&r| g.world.obj_protos[r as usize].vnum as i32).collect();
     assert_eq!(produced, products);
 }
+
+#[test]
+fn shop_vnum_fields_reject_wrapped_and_malformed_numbers() {
+    use mud_game::olc::{OlcData, sedit::*};
+    let mut f = fixture("vnum-bounds"); let g = &mut f.game;
+    let builder = player(g, b"Builder", 12345);
+    let di = descriptor(g, builder, ConState::Sedit);
+    for mode in [SEDIT_KEEPER, SEDIT_NEW_PRODUCT, SEDIT_NEW_ROOM] {
+        let valid = match mode {
+            SEDIT_KEEPER => g.world.mob_protos[0].vnum as i32,
+            SEDIT_NEW_PRODUCT => g.world.obj_protos[0].vnum as i32,
+            _ => g.world.rooms[1].vnum as i32,
+        };
+        for input in [(valid + 65536).to_string(), "-2".into(), "65535".into(),
+            "2147483647".into(), "-2147483648".into(), "9".repeat(400),
+            format!("{valid}junk")] {
+            let mut olc = OlcData::new(); sedit_setup_existing(g, &mut olc, 0);
+            olc.mode = mode;
+            let before = olc.shop.as_ref().unwrap().clone();
+            let keeper_before = olc.shop_keeper;
+            let olc = sedit_parse(g, di, olc, input.as_bytes()).unwrap();
+            assert_eq!(olc.mode, mode, "mode={mode} input={input}");
+            let after = olc.shop.as_ref().unwrap();
+            assert_eq!(after.keeper_vnum, before.keeper_vnum);
+            assert_eq!(olc.shop_keeper, keeper_before);
+            assert_eq!(after.producing, before.producing);
+            assert_eq!(after.in_rooms, before.in_rooms);
+        }
+        for number in [valid, -1] {
+            let mut olc = OlcData::new(); sedit_setup_existing(g, &mut olc, 0);
+            olc.mode = mode;
+            olc.shop.as_mut().unwrap().producing.clear();
+            olc.shop.as_mut().unwrap().in_rooms.clear();
+            let olc = sedit_parse(g, di, olc, number.to_string().as_bytes()).unwrap();
+            let shop = olc.shop.as_ref().unwrap();
+            match mode {
+                SEDIT_KEEPER => assert_eq!(olc.shop_keeper, if number == -1 { NOBODY } else { 0 }),
+                SEDIT_NEW_PRODUCT => assert_eq!(shop.producing, if number == -1 { vec![] } else { vec![valid] }),
+                _ => assert_eq!(shop.in_rooms, if number == -1 { vec![] } else { vec![valid] }),
+            }
+        }
+    }
+}
