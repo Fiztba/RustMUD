@@ -826,8 +826,9 @@ fn shopping_buy(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_idx
             && g.ch(keeper).points.gold > MAX_OUTSIDE_BANK
         {
             let excess = g.ch(keeper).points.gold - MAX_OUTSIDE_BANK;
-            g.shops_rt[shop_idx].bank += excess;
-            g.ch_mut(keeper).points.gold = MAX_OUTSIDE_BANK;
+            let deposit = excess.min(i32::MAX.saturating_sub(g.shops_rt[shop_idx].bank));
+            g.shops_rt[shop_idx].bank += deposit;
+            g.ch_mut(keeper).points.gold -= deposit;
         }
     }
     let head = g.ch(chid).carrying.first().copied();
