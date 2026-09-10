@@ -43,6 +43,22 @@ fn large_npc_inventories_keep_exact_counts_through_transfers() {
         assert_eq!(g.ch(first).carrying.len(), count);
         assert_eq!(g.ch(first).carry_weight as usize, count);
     }
+    let worn = objects[0];
+    mud_game::handler::obj_from_char(g, worn);
+    mud_game::handler::equip_char(g, first, worn, WEAR_HOLD);
+    assert_eq!(g.ch(first).carry_items, 299);
+    assert_eq!(mud_game::handler::unequip_char(g, first, WEAR_HOLD), Some(worn));
+    mud_game::handler::obj_to_char(g, worn, first);
+    assert_eq!(g.ch(first).carry_items, 300);
+    let contained = objects[1];
+    g.obj_mut(worn).type_flag = mud_data::flags::ITEM_CONTAINER;
+    g.obj_mut(worn).values[0] = 10;
+    mud_game::handler::obj_from_char(g, contained);
+    mud_game::handler::obj_to_obj(g, contained, worn);
+    assert_eq!(g.ch(first).carry_items, 299);
+    mud_game::handler::obj_from_obj(g, contained);
+    mud_game::handler::obj_to_char(g, contained, first);
+    assert_eq!(g.ch(first).carry_items, 300);
     for (index, &oid) in objects.iter().enumerate() {
         mud_game::handler::obj_from_char(g, oid);
         mud_game::handler::obj_to_char(g, oid, second);
