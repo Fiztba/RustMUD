@@ -64,7 +64,20 @@ fn large_weapon_damage_reaches_the_normal_damage_cap() {
     g.obj_mut(weapon).type_flag = flags::ITEM_WEAPON;
     g.obj_mut(weapon).values = [0, 8, i32::MAX, 0];
     mud_game::handler::equip_char(g, actor, weapon, WEAR_WIELD);
-    g.rng = mud_data::rng::CircleRng::new(12345);
-    mud_game::fight::hit(g, actor, victim, mud_data::spells::TYPE_UNDEFINED);
-    assert_eq!(g.ch(victim).points.hit, 900);
+    g.ch_mut(actor).aff_abils.str_ = 10;
+    for (num, size, attack, damage) in [
+        (8, i32::MAX, mud_data::spells::TYPE_UNDEFINED, 100),
+        (8, i32::MAX, mud_data::spells::SKILL_BACKSTAB, 100),
+        (1, 1, mud_data::spells::TYPE_UNDEFINED, 22),
+    ] {
+        mud_game::fight::stop_fighting(g, actor);
+        mud_game::fight::stop_fighting(g, victim);
+        g.ch_mut(victim).position = POS_SLEEPING;
+        g.ch_mut(victim).points.hit = 1000;
+        g.obj_mut(weapon).values[1] = num;
+        g.obj_mut(weapon).values[2] = size;
+        g.rng = mud_data::rng::CircleRng::new(12345);
+        mud_game::fight::hit(g, actor, victim, attack);
+        assert_eq!(g.ch(victim).points.hit, 1000 - damage);
+    }
 }

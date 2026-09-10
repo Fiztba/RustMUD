@@ -100,15 +100,20 @@ mod tests {
 
     #[test]
     fn large_dice_totals_saturate_without_changing_draw_consumption() {
-        let mut rng = CircleRng::new(12345);
-        let mut reference = rng.clone();
-        let sum: i64 = (0..8).map(|_| i64::from(reference.rand_number(1, i32::MAX))).sum();
-        assert!(sum > i64::from(i32::MAX));
-        assert_eq!(rng.dice(8, i32::MAX), i32::MAX);
-        assert_eq!(rng.circle_random(), reference.circle_random());
+        for seed in [1, 12345, i32::MAX - 1] {
+            for num in [0, 1, 2, 8, 50] {
+                for size in [0, 1, 6, 50, i32::MAX] {
+                    let mut rng = CircleRng::new(i64::from(seed));
+                    let mut reference = rng.clone();
+                    let sum: i64 = if size > 0 {
+                        (0..num).map(|_| i64::from(reference.rand_number(1, size))).sum()
+                    } else { 0 };
+                    assert_eq!(rng.dice(num, size), sum.min(i64::from(i32::MAX)) as i32);
+                    assert_eq!(rng.circle_random(), reference.circle_random());
+                }
+            }
+        }
     }
-
-
 
     /// The first three raw draws from seed 1, pinned.
     #[test]
