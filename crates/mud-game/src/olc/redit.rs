@@ -668,6 +668,13 @@ pub fn redit_parse(
     arg: &[u8],
 ) -> Option<Box<OlcData>> {
     let mut arg = arg.to_vec();
+    if matches!(olc.mode, REDIT_EXIT_NUMBER | REDIT_EXIT_KEY) {
+        let number = atoi(&arg);
+        if !is_number(&arg) || (number != -1 && !(0..NOTHING as i32).contains(&number)) {
+            write_to_desc(g, di, b"Enter a VNUM from 0 to 65534, or -1 for none : ");
+            return Some(olc);
+        }
+    }
     match olc.mode {
         REDIT_CONFIRM_SAVESTRING => {
             match arg.first().copied() {
@@ -936,7 +943,7 @@ pub fn redit_parse(
         REDIT_EXIT_NUMBER => {
             let mut number = atoi(&arg);
             if number != -1 {
-                match g.real_room((number as u16) as i32) {
+                match g.real_room(number) {
                     Some(r) => number = r as i32,
                     None => {
                         write_to_desc(g, di, b"That room does not exist, try again : ");

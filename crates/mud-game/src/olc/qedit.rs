@@ -472,6 +472,14 @@ pub fn qedit_parse(
     let number = atoi(arg);
     let chid = g.descriptors.get(di).and_then(|d| d.character);
 
+    if matches!(olc.mode, QEDIT_QUESTMASTER | QEDIT_PREREQ | QEDIT_RETURNMOB
+        | QEDIT_TARGET | QEDIT_NEXTQUEST | QEDIT_PREVQUEST | QEDIT_OBJ)
+        && (!is_number(arg) || (number != -1 && !(0..NOTHING as i32).contains(&number)))
+    {
+        write_to_desc(g, di, b"Enter a VNUM from 0 to 65534, or -1 for none : ");
+        return Some(olc);
+    }
+
     match olc.mode {
         QEDIT_CONFIRM_SAVESTRING => {
             match arg.first().copied() {
