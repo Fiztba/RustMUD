@@ -491,8 +491,8 @@ pub fn mag_masses(g: &mut Game, _level: i32, chid: CharId, _spellnum: i32, _save
     }
 }
 
-/// mag_areas — earthquake. Savetype hardcoded 1 (ROD).
-pub fn mag_areas(g: &mut Game, level: i32, chid: CharId, spellnum: i32, _savetype: i32) {
+/// mag_areas — earthquake, using the saving category of the casting source.
+pub fn mag_areas(g: &mut Game, level: i32, chid: CharId, spellnum: i32, savetype: i32) {
     let mut to_char: Option<&[u8]> = None;
     let mut to_room: Option<&[u8]> = None;
 
@@ -536,7 +536,7 @@ pub fn mag_areas(g: &mut Game, level: i32, chid: CharId, spellnum: i32, _savetyp
             continue;
         }
         // Doesn't matter if they die here so we don't check. -gg 6/24/98
-        mag_damage(g, level, chid, Some(tch), spellnum, 1);
+        mag_damage(g, level, chid, Some(tch), spellnum, savetype);
     }
 }
 
