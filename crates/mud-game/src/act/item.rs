@@ -117,6 +117,10 @@ pub fn do_put(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd:
 
     if theobj.is_empty() {
         send_to_char(g, chid, b"Put what in what?\r\n");
+    } else if howmany <= 0 {
+        // is_number accepts a leading '-', so a negative count would otherwise
+        // run the countdown below past zero (see do_drop).
+        send_to_char(g, chid, b"Yeah, that makes sense.\r\n");
     } else if cont_dotmode != FIND_INDIV {
         send_to_char(g, chid, b"You can only put things into one container at a time.\r\n");
     } else if thecont.is_empty() {
@@ -450,13 +454,24 @@ pub fn do_get(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd:
     } else if arg2.is_empty() {
         get_from_room(g, chid, &arg1, 1);
     } else if is_number(&arg1) && arg3.is_empty() {
-        get_from_room(g, chid, &arg2, atoi(&arg1));
+        let howmany = atoi(&arg1);
+        if howmany <= 0 {
+            // is_number accepts a leading '-', so a negative count would
+            // otherwise run the countdown past zero (see do_drop).
+            send_to_char(g, chid, b"Yeah, that makes sense.\r\n");
+            return;
+        }
+        get_from_room(g, chid, &arg2, howmany);
     } else {
         let (amount, arg1, arg2) = if is_number(&arg1) {
             (atoi(&arg1), arg2.clone(), arg3.clone())
         } else {
             (1, arg1.clone(), arg2.clone())
         };
+        if amount <= 0 {
+            send_to_char(g, chid, b"Yeah, that makes sense.\r\n");
+            return;
+        }
         let (cont_dotmode, cont_name) = find_all_dots(&arg2);
         if cont_dotmode == FIND_INDIV {
             let (mode, _, cont) = generic_find(g, chid, &cont_name, FIND_OBJ_INV | FIND_OBJ_ROOM);
@@ -901,6 +916,10 @@ pub fn do_give(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd
                 perform_give_gold(g, chid, vict, amount);
             }
             return;
+        } else if amount <= 0 {
+            // is_number accepts a leading '-', so a negative count would
+            // otherwise run the countdown below past zero (see do_drop).
+            send_to_char(g, chid, b"Yeah, that makes sense.\r\n");
         } else if arg.is_empty() {
             // Give multiple code.
             send_to_char(g, chid, format!("What do you want to give {} of?\r\n", amount).as_bytes());
