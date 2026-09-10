@@ -382,8 +382,9 @@ fn do_wmove(g: &mut Game, room: RoomRnum, argument: &[u8], _subcmd: i32) {
             obj_to_room(g, o, target);
         }
     } else if let Some(o) = get_obj_by_room(g, room, &arg1) {
-        obj_from_room(g, o);
-        obj_to_room(g, o, target);
+        if !super::misc::move_object_to_room(g, o, target) {
+            wld_log(g, room, "wmove: target object has no location!");
+        }
     } else {
         wld_log(g, room, "wmove: no target found");
     }

@@ -16,8 +16,8 @@ use super::{
 };
 use crate::game::Game;
 use crate::handler::{
-    char_from_room, char_to_room, equip_char, extract_char, extract_obj, obj_from_char,
-    obj_from_obj, obj_from_room, obj_to_char, obj_to_obj, obj_to_room, eq_ci, unequip_char,
+    char_from_room, char_to_room, equip_char, extract_char, extract_obj,
+    obj_to_char, obj_to_obj, obj_to_room, eq_ci, unequip_char,
 };
 
 pub type BStr = Vec<u8>;
@@ -44,7 +44,8 @@ fn find_obj_target_room(g: &mut Game, oid: ObjId, rawroomstr: &[u8]) -> Option<R
         return None;
     };
 
-    let rflag = |bit: usize| g.world.rooms[location as usize].room_flags[bit / 32] & (1 << (bit % 32)) != 0;
+    let room = g.world.rooms.get(location as usize)?;
+    let rflag = |bit: usize| room.room_flags[bit / 32] & (1 << (bit % 32)) != 0;
     if rflag(flags::ROOM_GODROOM) || rflag(flags::ROOM_HOUSE) {
         return None;
     }
@@ -632,24 +633,13 @@ fn do_omove(g: &mut Game, oid: ObjId, argument: &[u8], _subcmd: i32) {
         obj_log(g, oid, "omove called with too few args");
         return;
     }
-    let target = find_obj_target_room(g, oid, &arg1);
-    if target.is_none() {
-        // Logged, but the move still happens: obj_to_room refuses NOWHERE
-        // and the object is left in limbo. Deliberate.
+    let Some(target) = find_obj_target_room(g, oid, &arg1) else {
         obj_log(g, oid, "omove target is an invalid room");
-    }
-    let ob = g.obj(oid);
-    if ob.carried_by.is_some() {
-        obj_from_char(g, oid);
-    } else if ob.in_room != NOWHERE {
-        obj_from_room(g, oid);
-    } else if ob.in_obj.is_some() {
-        obj_from_obj(g, oid);
-    } else {
-        obj_log(g, oid, "omove: target object is not in a room, held or in a container!");
         return;
+    };
+    if !super::misc::move_object_to_room(g, oid, target) {
+        obj_log(g, oid, "omove: target object has no location!");
     }
-    obj_to_room(g, oid, target.unwrap_or(NOWHERE));
 }
 
 type ObjCmd = fn(&mut Game, ObjId, &[u8], i32);
