@@ -1795,6 +1795,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn ttype_color_suffix_is_exact_and_works_in_later_responses() {
+        for name in [b"".as_slice(), b"x", b"256color", b"rxvt-unicode", b"screen-256color-extra", b"screen-256colors"] {
+            let mut p = ProtocolState::new();
+            ttype(&mut p, name);
+            assert_eq!(p.var_int(Var::XTERM_256_COLORS), 0, "{name:?}");
+        }
+        let mut p = ProtocolState::new();
+        ttype(&mut p, b"PROBE");
+        ttype(&mut p, b"RXVT-UNICODE-256COLOR");
+        assert_eq!(p.var_int(Var::XTERM_256_COLORS), 1);
+        p.out.clear();
+        ttype(&mut p, b"RXVT-UNICODE-256COLOR");
+        assert_eq!(requests(&p), 0);
+        assert_eq!(p.var_int(Var::XTERM_256_COLORS), 1);
+    }
+
     /// What the cycle is for: MTTS only ever arrives on a later response, so
     /// it was unreachable while the first response ended the cycle.
     #[test]
