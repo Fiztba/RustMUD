@@ -213,18 +213,28 @@ pub enum ActArg<'a> {
     Text(&'a [u8]),
 }
 
+struct RenderedAct {
+    out: Vec<u8>,
+    dg_victim: Option<CharId>,
+    dg_target: Option<ObjId>,
+    dg_arg: Option<Vec<u8>>,
+}
+
+/// Expand and deliver a message to a single receiver.
+pub(crate) fn perform_act(g: &mut Game, orig: &[u8], ch: Option<CharId>, obj: Option<ObjId>, vict_obj: ActArg, to: CharId) -> Vec<u8> {
+    let rendered = render_act(g, orig, ch, obj, vict_obj, to);
+    deliver_act(g, rendered, ch, obj, to)
+}
+
 /// perform_act: expand $-codes for one receiver.
-pub(crate) fn perform_act(
+fn render_act(
     g: &mut Game,
     orig: &[u8],
     ch: Option<CharId>,
     obj: Option<ObjId>,
     vict_obj: ActArg,
     to: CharId,
-) -> Vec<u8> {
-    // dg_act_check is set by act, so direct perform_act callers
-    // (say_spell) see the value the last act call left behind.
-    let dg_act_check = g.dg_act_check;
+) -> RenderedAct {
     let mut out: Vec<u8> = Vec::with_capacity(orig.len() + 16);
     let mut uppercase_next = false;
     let mut idx = 0usize;
@@ -369,6 +379,16 @@ pub(crate) fn perform_act(
     }
     out.extend_from_slice(b"\r\n");
 
+    RenderedAct { out, dg_victim, dg_target, dg_arg }
+}
+
+fn deliver_act(g: &mut Game, rendered: RenderedAct, ch: Option<CharId>, obj: Option<ObjId>, to: CharId) -> Vec<u8> {
+    let RenderedAct { mut out, dg_victim, dg_target, dg_arg } = rendered;
+    if g.try_ch(to).is_none() { return out; }
+    let ch = ch.filter(|&id| g.try_ch(id).is_some());
+    let obj = obj.filter(|&id| g.try_obj(id).is_some());
+    let dg_victim = dg_victim.filter(|&id| g.try_ch(id).is_some());
+    let dg_target = dg_target.filter(|&id| g.try_obj(id).is_some());
     // CAP happens inside the desc-write, so descriptor-less receivers
     // (act-trigger mobs) get the UNcapitalized text.
     if let Some(di) = g.ch(to).desc {
@@ -377,7 +397,7 @@ pub(crate) fn perform_act(
     }
 
     // act triggers: nag the mobs.
-    if g.ch(to).is_npc() && dg_act_check && ch != Some(to) {
+    if g.ch(to).is_npc() && g.dg_act_check && ch != Some(to) {
         crate::dg::triggers::act_mtrigger(
             g,
             to,
@@ -411,7 +431,7 @@ pub fn objs_vis(g: &Game, oid: ObjId, to: CharId) -> Vec<u8> {
 /// SENDOK: desc OR an Act-trigger script, awake gate,
 /// not writing. Dead-pending chars still receive.
 fn sendok(g: &Game, chid: CharId, to_sleeping: bool) -> bool {
-    let ch = g.ch(chid);
+    let Some(ch) = g.try_ch(chid) else { return false };
     (ch.desc.is_some() || g.script_check(crate::dg::GoId::Char(chid), crate::dg::MTRIG_ACT))
         && (to_sleeping || ch.awake())
         && !ch.plr(flags::PLR_WRITING)
@@ -434,7 +454,16 @@ pub fn act(
     act_full(g, s, hide_invisible, ch, obj, varg, type_)
 }
 
-pub fn act_full(
+/// Keep the trigger policy scoped to this broadcast, including nested acts.
+pub fn act_full(g: &mut Game, s: &[u8], hide_invisible: bool, ch: Option<CharId>, obj: Option<ObjId>, vict_obj: ActArg, type_: i32) -> Option<Vec<u8>> {
+    let previous = g.dg_act_check;
+    g.dg_act_check = type_ & DG_NO_TRIG == 0;
+    let result = act_full_inner(g, s, hide_invisible, ch, obj, vict_obj, type_);
+    g.dg_act_check = previous;
+    result
+}
+
+fn act_full_inner(
     g: &mut Game,
     s: &[u8],
     hide_invisible: bool,
@@ -450,7 +479,6 @@ pub fn act_full(
     if to_sleeping {
         type_ &= !TO_SLEEP;
     }
-    g.dg_act_check = type_ & DG_NO_TRIG == 0;
     if type_ & DG_NO_TRIG != 0 {
         type_ &= !DG_NO_TRIG;
     }
@@ -472,7 +500,7 @@ pub fn act_full(
         return None;
     }
     if type_ == TO_GMOTE {
-        let mut last = None;
+        let mut messages = Vec::new();
         for di in g.descriptors.indices() {
             let Some(d) = g.descriptors.get(di) else { continue };
             if d.state != ConState::Playing {
@@ -491,9 +519,12 @@ pub fn act_full(
             buf.extend_from_slice(cc(g, to, C_NRM, KYEL));
             buf.extend_from_slice(s);
             buf.extend_from_slice(cc(g, to, C_NRM, KNRM));
-            last = Some(perform_act(g, &buf, ch, obj, vict_obj, to));
+            messages.push((to, render_act(g, &buf, ch, obj, vict_obj, to)));
         }
-        return last;
+        return messages.into_iter().filter_map(|(to, message)| {
+            g.try_ch(to)?;
+            Some(deliver_act(g, message, ch, obj, to))
+        }).last();
     }
 
     // TO_ROOM / TO_NOTVICT.
@@ -508,7 +539,8 @@ pub fn act_full(
         },
     };
     let people = g.rooms[room as usize].people.clone();
-    let mut last = None;
+    // Snapshot the event text before any listener can remove its entities.
+    let mut messages = Vec::new();
     for to in people {
         if !sendok(g, to, to_sleeping) || Some(to) == ch {
             continue;
@@ -527,9 +559,12 @@ pub fn act_full(
                 }
             }
         }
-        last = Some(perform_act(g, s, ch, obj, vict_obj, to));
+        messages.push((to, render_act(g, s, ch, obj, vict_obj, to)));
     }
-    last
+    messages.into_iter().filter_map(|(to, message)| {
+        if !sendok(g, to, to_sleeping) { return None; }
+        Some(deliver_act(g, message, ch, obj, to))
+    }).last()
 }
 
 /// send_to_group: every PC member with a playing

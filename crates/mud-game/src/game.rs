@@ -211,8 +211,8 @@ pub struct Game {
     pub dg_script_depth: i32,
     /// dg_owner_purged.
     pub dg_owner_purged: bool,
-    /// dg_act_check: whether the LAST act call had triggers enabled.
-    /// Direct perform_act callers observe the stale value.
+    /// dg_act_check: whether the enclosing act call has triggers enabled.
+    /// Enabled by default outside a broadcast; nested acts restore this value.
     pub dg_act_check: bool,
 
     /// Log sink: lines are timestamped and written by the binary's logger.
