@@ -209,6 +209,8 @@ pub fn cap(txt: &mut [u8]) {
 pub enum ActArg<'a> {
     None,
     Char(CharId),
+    /// A character target with body-part text for social messages ($t).
+    CharText(CharId, &'a [u8]),
     Obj(ObjId),
     Text(&'a [u8]),
 }
@@ -241,7 +243,7 @@ fn render_act(
     // DG victim/target/arg tracking: dg_victim defaults
     // to the receiver when they ARE the vict_obj.
     let mut dg_victim: Option<CharId> = match vict_obj {
-        ActArg::Char(v) if v == to => Some(v),
+        ActArg::Char(v) | ActArg::CharText(v, _) if v == to => Some(v),
         _ => None,
     };
     let mut dg_target: Option<ObjId> = None;
@@ -268,7 +270,7 @@ fn render_act(
             let expansion: Vec<u8> = match code {
                 b'n' => ch.map(|c| pers(g, to, c)).unwrap_or_default(),
                 b'N' => match vict_obj {
-                    ActArg::Char(v) => {
+                    ActArg::Char(v) | ActArg::CharText(v, _) => {
                         dg_victim = Some(v);
                         pers(g, to, v)
                     }
@@ -276,7 +278,7 @@ fn render_act(
                 },
                 b'm' => ch.map(|c| hmhr(g.ch(c).sex).to_vec()).unwrap_or_default(),
                 b'M' => match vict_obj {
-                    ActArg::Char(v) => {
+                    ActArg::Char(v) | ActArg::CharText(v, _) => {
                         dg_victim = Some(v);
                         hmhr(g.ch(v).sex).to_vec()
                     }
@@ -284,7 +286,7 @@ fn render_act(
                 },
                 b's' => ch.map(|c| hshr(g.ch(c).sex).to_vec()).unwrap_or_default(),
                 b'S' => match vict_obj {
-                    ActArg::Char(v) => {
+                    ActArg::Char(v) | ActArg::CharText(v, _) => {
                         dg_victim = Some(v);
                         hshr(g.ch(v).sex).to_vec()
                     }
@@ -292,7 +294,7 @@ fn render_act(
                 },
                 b'e' => ch.map(|c| hssh(g.ch(c).sex).to_vec()).unwrap_or_default(),
                 b'E' => match vict_obj {
-                    ActArg::Char(v) => {
+                    ActArg::Char(v) | ActArg::CharText(v, _) => {
                         dg_victim = Some(v);
                         hssh(g.ch(v).sex).to_vec()
                     }
@@ -336,7 +338,10 @@ fn render_act(
                     _ => b"<NULL>".to_vec(),
                 },
                 b't' => match vict_obj {
-                    // $t reads `obj` as text; used by DG only.
+                    ActArg::CharText(_, text) => {
+                        dg_arg = Some(text.to_vec());
+                        text.to_vec()
+                    }
                     _ => b"<NULL>".to_vec(),
                 },
                 b'F' => match vict_obj {
@@ -492,7 +497,7 @@ fn act_full_inner(
         return None;
     }
     if type_ == TO_VICT {
-        if let ActArg::Char(to) = vict_obj {
+        if let ActArg::Char(to) | ActArg::CharText(to, _) = vict_obj {
             if sendok(g, to, to_sleeping) {
                 return Some(perform_act(g, s, ch, obj, vict_obj, to));
             }
@@ -553,7 +558,7 @@ fn act_full_inner(
             }
         }
         if type_ != TO_ROOM {
-            if let ActArg::Char(v) = vict_obj {
+            if let ActArg::Char(v) | ActArg::CharText(v, _) = vict_obj {
                 if to == v {
                     continue;
                 }
