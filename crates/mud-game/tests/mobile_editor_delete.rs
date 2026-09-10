@@ -84,4 +84,12 @@ fn mobile_delete_confirmation_accepts_no_and_yes() {
     assert!(g.world.real_mobile(source).is_some());
     assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Playing);
     assert!(!g.ch(ch).act.is_set(flags::PLR_WRITING));
+    // An unsaved new mobile copied from an existing one cannot delete its source.
+    mud_game::olc::medit::do_oasis_medit(g, ch, b"3098", 0, 0);
+    for input in [b"w".as_slice(), source.to_string().as_bytes(), b"x", b"y"] {
+        assert!(mud_game::olc::olc_parse(g, di, input));
+    }
+    assert!(g.world.real_mobile(source).is_some());
+    assert!(g.world.real_mobile(vnum).is_none());
+    assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Playing);
 }
