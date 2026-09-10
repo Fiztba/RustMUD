@@ -456,6 +456,7 @@ pub fn close_socket(g: &mut Game, di: usize) {
     let Some(d) = g.descriptors.get(di) else { return };
     let state = d.state;
     let chid = d.character;
+    let original = d.original;
     // A scanner that drops mid-handshake never sends a name, so the host is
     // the only thing identifying it. Taken here because the descriptor is
     // gone by the time the losing lines below are written.
@@ -488,19 +489,23 @@ pub fn close_socket(g: &mut Game, di: usize) {
     if let Some(chid) = chid {
         if g.try_ch(chid).is_some() {
             if is_playing {
+                // If we're switched, this resets the mobile taken.
                 g.ch_mut(chid).desc = None;
-                crate::players_glue::save_char(g, chid);
+                // The person behind the link: the original body while
+                // switched, otherwise the character itself.
+                let link_challenged = original.filter(|&o| g.try_ch(o).is_some()).unwrap_or(chid);
+                crate::players_glue::save_char(g, link_challenged);
                 crate::comm::act(
                     g,
                     b"$n has lost $s link.",
                     true,
-                    Some(chid),
+                    Some(link_challenged),
                     None,
                     None,
                     crate::comm::TO_ROOM,
                 );
-                let name = String::from_utf8_lossy(g.ch(chid).get_name()).into_owned();
-                let invis = g.ch(chid).invis_lev();
+                let name = String::from_utf8_lossy(g.ch(link_challenged).get_name()).into_owned();
+                let invis = g.ch(link_challenged).invis_lev();
                 g.mudlog(
                     MudlogKind::Nrm,
                     (LVL_IMMORT as i16).max(invis) as u8,
@@ -532,6 +537,11 @@ pub fn close_socket(g: &mut Game, di: usize) {
                 String::from_utf8_lossy(&host)
             ),
         );
+    }
+    // Part of the unending quest to make switch stable: the original body
+    // must not keep pointing at a descriptor that is about to go away.
+    if let Some(orig) = original.and_then(|o| g.chars.get_mut(o)) {
+        orig.desc = None;
     }
     // Cancel pending protocol events for this descriptor.
     g.events.retain(|e| !matches!(e.kind, EventKind::Protocols { desc } if desc == di));
