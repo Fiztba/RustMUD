@@ -68,6 +68,23 @@ fn look_ordinals_count_inventory_room_and_equipment_once() {
         mud_game::act::informative::do_look(g, ch, arg, 0, 0);
         assert!(output(g, di).contains(expected), "arg={arg:?}");
     }
+    mud_game::act::informative::do_look(g, ch, b"last.note", 0, 0);
+    assert!(output(g, di).contains("INVENTORY_NOTE"));
+    for arg in [b"0.note".as_slice(), b"4.note"] {
+        mud_game::act::informative::do_look(g, ch, arg, 0, 0);
+        assert!(output(g, di).contains("do not see"));
+    }
+    for (i, &oid) in objects.iter().enumerate() {
+        g.obj_mut(oid).name = Some(b"box".to_vec()); g.obj_mut(oid).type_flag = flags::ITEM_CONTAINER; g.obj_mut(oid).values[0] = 100;
+        let mut child = mud_game::obj::create_obj(); child.name = Some(b"gem".to_vec()); child.short_description = Some(format!("CONTENT_{i}").into_bytes());
+        let child = g.objs.insert(child); mud_game::handler::obj_to_obj(g, child, oid);
+    }
+    for (i, arg) in [b"in 1.box".as_slice(), b"in 2.box", b"in 3.box"].into_iter().enumerate() {
+        mud_game::act::informative::do_look(g, ch, arg, 0, 0);
+        assert!(output(g, di).contains(&format!("CONTENT_{i}")));
+    }
+    mud_game::act::informative::do_examine(g, ch, b"3.box", 0, 0);
+    assert!(output(g, di).contains("CONTENT_2"));
 }
 #[test]
 fn examine_respects_blindness_for_room_descriptions() {
@@ -76,6 +93,14 @@ fn examine_respects_blindness_for_room_descriptions() {
     g.ch_mut(ch).affected_by.set(mud_data::flags::AFF_BLIND);
     mud_game::act::informative::do_examine(g, ch, b"wall", 0, 0);
     let text = output(g, di); assert!(!text.contains("HIDDEN_WRITING")); assert!(text.contains("blind"));
+    g.ch_mut(ch).affected_by.remove(mud_data::flags::AFF_BLIND);
+    g.rooms[0].light = 0; g.world.rooms[0].room_flags[0] |= 1 << mud_data::flags::ROOM_DARK;
+    mud_game::act::informative::do_examine(g, ch, b"wall", 0, 0);
+    let text = output(g, di); assert!(!text.contains("HIDDEN_WRITING")); assert!(text.contains("pitch black"));
+    g.rooms[0].light = 1; g.ch_mut(ch).position = POS_STUNNED;
+    mud_game::act::informative::do_examine(g, ch, b"wall", 0, 0); assert!(output(g, di).contains("stars"));
+    g.ch_mut(ch).position = POS_STANDING;
+    mud_game::act::informative::do_examine(g, ch, b"wall", 0, 0); assert!(output(g, di).contains("HIDDEN_WRITING"));
 }
 #[test]
 fn who_group_filters_list_group_members_and_leaders() {
@@ -87,12 +112,27 @@ fn who_group_filters_list_group_members_and_leaders() {
     let text = output(g, di); assert!(text.contains("Leader") && text.contains("Member")); assert!(!text.contains("Solo"));
     mud_game::act::informative::do_who(g, ch, b"-l", 0, 0);
     let text = output(g, di); assert!(text.contains("Leader")); assert!(!text.contains("Member") && !text.contains("Solo"));
+    mud_game::act::informative::do_who(g, ch, b"-s -g -l", 0, 0);
+    let text = output(g, di); assert!(text.contains("Leader")); assert!(!text.contains("Member") && !text.contains("Solo"));
+    mud_game::handler::leave_group(g, member);
+    mud_game::act::informative::do_who(g, ch, b"-g", 0, 0);
+    let text = output(g, di); assert!(text.contains("Leader")); assert!(!text.contains("Member"));
 }
 #[test]
 fn areas_includes_zones_contained_by_the_requested_range() {
     let mut f = fixture("areas"); let g = &mut f.game; let (ch, di) = viewer(g);
     let mut zone = mud_world::model::Zone::default(); zone.name = Some(b"TEST_AREA".to_vec()); zone.min_level = 10; zone.max_level = 20;
     zone.zone_flags[0] |= 1 << mud_data::flags::ZONE_GRID; g.world.zones = vec![zone];
-    mud_game::act::informative::do_areas(g, ch, b"5-25", 0, 0);
-    assert!(output(g, di).contains("TEST_AREA"));
+    for (arg, shown, overlap) in [
+        ("5-25", true, false), ("25-5", true, false), ("12-18", true, true),
+        ("0-10", true, true), ("20-30", true, true), ("0-9", false, false), ("21-30", false, false),
+        ("15", true, false), ("9", false, false), ("", true, false),
+    ] {
+        mud_game::act::informative::do_areas(g, ch, arg.as_bytes(), 0, 0);
+        let text = output(g, di); assert_eq!(text.contains("TEST_AREA"), shown, "{arg}"); assert_eq!(text.contains("Areas shown in"), overlap, "{arg}");
+    }
+    for (min, max, arg, shown) in [(-1, 20, "0-5", true), (10, -1, "30-40", true), (-1, -1, "0-100", true), (10, -1, "0-9", false)] {
+        g.world.zones[0].min_level = min; g.world.zones[0].max_level = max;
+        mud_game::act::informative::do_areas(g, ch, arg.as_bytes(), 0, 0); assert_eq!(output(g, di).contains("TEST_AREA"), shown);
+    }
 }
