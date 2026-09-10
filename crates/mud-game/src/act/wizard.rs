@@ -546,6 +546,11 @@ pub fn do_load(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd
         send_to_char(g, chid, b"That is not a number.\r\n");
         return;
     }
+    let vnum = atoi(&buf2);
+    if !(0..NOTHING as i32).contains(&vnum) {
+        send_to_char(g, chid, b"Virtual numbers must be between 0 and 65534.\r\n");
+        return;
+    }
     let n = {
         let v = atoi(&buf3);
         if v > 0 && v <= 100 {
@@ -564,7 +569,7 @@ pub fn do_load(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd
             send_to_char(g, chid, b"Sorry, you can't load mobs here.\r\n");
             return;
         }
-        let Some(r_num) = g.world.real_mobile(atoi(&buf2) as Idx) else {
+        let Some(r_num) = g.world.real_mobile(vnum as Idx) else {
             send_to_char(g, chid, b"There is no monster with that number.\r\n");
             return;
         };
@@ -590,7 +595,7 @@ pub fn do_load(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd
             send_to_char(g, chid, b"Sorry, you can't load objects here.\r\n");
             return;
         }
-        let Some(r_num) = g.world.real_object(atoi(&buf2) as Idx) else {
+        let Some(r_num) = g.world.real_object(vnum as Idx) else {
             send_to_char(g, chid, b"There is no object with that number.\r\n");
             return;
         };
@@ -2691,10 +2696,15 @@ pub fn do_checkloadstatus(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usi
         send_to_char(g, chid, b"Checkload <M | O | T> <vnum>\r\n");
         return;
     }
+    let vnum = atoi(&buf2);
+    if !is_number(&buf2) || !(0..NOTHING as i32).contains(&vnum) {
+        send_to_char(g, chid, b"Virtual numbers must be between 0 and 65534.\r\n");
+        return;
+    }
     match buf1[0].to_ascii_lowercase() {
-        b'm' => mob_checkload(g, chid, atoi(&buf2)),
-        b'o' => obj_checkload(g, chid, atoi(&buf2)),
-        b't' => trg_checkload(g, chid, atoi(&buf2)),
+        b'm' => mob_checkload(g, chid, vnum),
+        b'o' => obj_checkload(g, chid, vnum),
+        b't' => trg_checkload(g, chid, vnum),
         _ => {}
     }
 }
