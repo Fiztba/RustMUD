@@ -257,10 +257,8 @@ pub fn sedit_setup_existing(g: &Game, olc: &mut OlcData, rshop_num: usize) {
 fn sedit_save_internally(g: &mut Game, di: usize, olc: &mut OlcData) {
     // Read before add_shop overwrites the record: the mobile this shop used to
     // keep, and the spec proc that mobile had before it was made a keeper.
-    let (oldkeeper, oldfunc) = match real_shop(g, olc.number) {
-        Some(r) => (g.shops_rt[r].keeper, g.shops_rt[r].func),
-        None => (NOBODY, None),
-    };
+    let current = real_shop(g, olc.number).map(|r| ShopRtScratch::from_rt(&g.shops_rt[r]));
+    let (oldkeeper, oldfunc) = current.as_ref().map_or((NOBODY, None), |rt| (rt.keeper, rt.func));
 
     let mut shop = olc.shop.as_ref().unwrap().as_ref().clone();
     shop.vnum = olc.number as Idx;
@@ -272,9 +270,9 @@ fn sedit_save_internally(g: &mut Game, di: usize, olc: &mut OlcData) {
     };
     let rt = ShopRtScratch {
         keeper: olc.shop_keeper,
-        bank: olc.shop_bank,
-        sort: olc.shop_sort,
-        func: olc.shop_func,
+        bank: current.as_ref().map_or(0, |rt| rt.bank),
+        sort: current.as_ref().filter(|rt| rt.keeper == olc.shop_keeper).map_or(0, |rt| rt.sort),
+        func: current.as_ref().filter(|rt| rt.keeper == olc.shop_keeper).and_then(|rt| rt.func),
     };
     add_shop(g, &shop, &rt);
 
