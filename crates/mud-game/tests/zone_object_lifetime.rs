@@ -47,6 +47,11 @@ fn reset_does_not_attach_to_object_purged_by_load_trigger() {
     ];
     mud_game::db::reset_zone(g, 0);
     assert_eq!(g.obj_counts[obj], before);
+    g.world.triggers[nr as usize].cmdlist = vec![b"return 1".to_vec()];
+    mud_game::db::reset_zone(g, 0);
+    assert_eq!(g.obj_counts[obj], before + 1);
+    let live = *g.object_list.iter().find(|&&o| g.obj(o).item_number == obj as u16).unwrap();
+    assert_eq!(g.obj(live).script.as_ref().unwrap().trig_list.len(), 2);
 }
 
 #[test]
