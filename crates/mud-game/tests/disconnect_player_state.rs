@@ -59,13 +59,19 @@ fn disconnect_checks_the_original_player_while_switched_into_an_npc() {
     { let d = g.descriptors.get_mut(di).unwrap(); d.original = Some(senior); d.desc_num = 42; }
     mud_game::act::wizard::do_dc(g, admin, b"42", 0, 0);
     assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Playing);
+    g.ch_mut(senior).level = LVL_GOD;
+    mud_game::act::wizard::do_dc(g, admin, b"42", 0, 0);
+    assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Playing);
+    g.ch_mut(senior).level = LVL_BUILDER; g.ch_mut(body).level = 100;
+    mud_game::act::wizard::do_dc(g, admin, b"42", 0, 0);
+    assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Disconnect);
 }
 #[test]
 fn disconnecting_an_editor_keeps_its_player_in_the_world() {
     let mut f = fixture("editor"); let g = &mut f.game;
     let admin = player(g, b"Admin", 12345); g.ch_mut(admin).level = LVL_IMPL;
     descriptor(g, admin, ConState::Playing); mud_game::handler::char_to_room(g, admin, 0);
-    for state in [ConState::Playing, ConState::Oedit, ConState::Msgedit] {
+    for state in [ConState::Playing, ConState::Oedit, ConState::Redit, ConState::Zedit, ConState::Medit, ConState::Sedit, ConState::Tedit, ConState::Cedit, ConState::Aedit, ConState::Trigedit, ConState::Hedit, ConState::Qedit, ConState::Prefedit, ConState::Ibtedit, ConState::Msgedit] {
         let target = player(g, b"Target", 12346); mud_game::handler::char_to_room(g, target, 0); g.character_list.push_front(target);
         let di = descriptor(g, target, state); g.descriptors.get_mut(di).unwrap().desc_num = 42;
         mud_game::act::wizard::do_dc(g, admin, b"42", 0, 0);
@@ -73,4 +79,9 @@ fn disconnecting_an_editor_keeps_its_player_in_the_world() {
         mud_game::run::close_socket(g, di);
         assert!(g.try_ch(target).is_some()); assert!(g.rooms[0].people.contains(&target)); assert_eq!(g.ch(target).desc, None);
     }
+    let shell = player(g, b"Login", 12347); let di = descriptor(g, shell, ConState::Password);
+    g.descriptors.get_mut(di).unwrap().desc_num = 42;
+    mud_game::act::wizard::do_dc(g, admin, b"42", 0, 0);
+    assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Close);
+    mud_game::run::close_socket(g, di); assert!(g.try_ch(shell).is_none());
 }
