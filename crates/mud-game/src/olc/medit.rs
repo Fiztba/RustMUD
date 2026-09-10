@@ -703,7 +703,9 @@ pub fn medit_parse(
     let mut arg = arg.to_vec();
     let mut i: i32 = -1;
 
-    if olc.mode > MEDIT_NUMERICAL_RESPONSE {
+    if olc.mode > MEDIT_NUMERICAL_RESPONSE
+        && !matches!(olc.mode, MEDIT_DELETE | crate::olc::trigedit::OLC_SCRIPT_EDIT)
+    {
         i = atoi(&arg);
         // A guard that only rejects a lone "-" lets anything else
         // non-numeric land as atoi == 0 — `abc` at the position prompt
@@ -1107,8 +1109,8 @@ pub fn medit_parse(
         MEDIT_DELETE => {
             match arg.first().copied() {
                 Some(b'y') | Some(b'Y') => {
-                    let rnum = olc.mob_rnum;
-                    if delete_mobile(g, rnum).is_some() {
+                    let rnum = g.world.real_mobile(olc.number as Idx);
+                    if rnum.and_then(|r| delete_mobile(g, r)).is_some() {
                         write_to_desc(g, di, b"Mobile deleted.\r\n");
                         // Same toggle the save path honours.
                         if g.config.auto_save_olc {
