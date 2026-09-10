@@ -263,6 +263,20 @@ pub fn delete_object(g: &mut Game, rnum: Idx) -> Option<Idx> {
     for zvnum in touched {
         add_to_save_list(g, zvnum, SL_ZON);
     }
+    // Open editors hold independent copies of these runtime object
+    // indices: zedit scratch zones and the rnum oedit keeps for its
+    // subject. Saving a stale copy would put an out-of-range rnum back
+    // into the live tables.
+    for olc in g.olc.values_mut() {
+        if let Some(zone) = olc.zone.as_mut() {
+            crate::olc::genzon::remove_prototype_resets(zone, rnum, false);
+        }
+        if olc.obj_rnum == rnum {
+            olc.obj_rnum = NOTHING;
+        } else if olc.obj_rnum != NOTHING && olc.obj_rnum > rnum {
+            olc.obj_rnum -= 1;
+        }
+    }
     // Flag rather than write; oedit's delete branch honours the toggle.
     if let Some(z) = zrnum {
         let zvnum = g.world.zones[z].number;
