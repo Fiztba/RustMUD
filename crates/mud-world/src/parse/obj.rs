@@ -173,7 +173,7 @@ fn parse_object(world: &mut World, r: &mut Reader, nr: i32) -> Result<Vec<u8>, S
         && obj.weight < obj.values[1]
         && obj.wear_flags[0] & (1 << 0) != 0
     {
-        obj.weight = obj.values[1] + 5;
+        obj.weight = obj.values[1].saturating_add(5);
     }
 
     /* Trailing E / A / T blocks until the next "#" or "$" line. */
@@ -361,6 +361,36 @@ mod tests {
         // Heavy enough: untouched.
         let w = parse(&body("a", "20"));
         assert_eq!(w.obj_protos[0].weight, 20);
+    }
+
+    /// A hand-edited or oedit-saved capacity of i32::MAX must not make the
+    /// `+ 5` weight fix-up overflow and abort the whole world boot.
+    #[test]
+    fn drinkcon_weight_fixup_saturates_at_max_capacity() {
+        let body = |type_flag: &str, capacity: &str| {
+            let mut d = Vec::new();
+            d.extend_from_slice(HEAD);
+            d.extend_from_slice(
+                format!("{type_flag} 0 0 0 0 a 0 0 0 0 0 0 0
+{capacity} {capacity} 1 0
+1 20 8 0 0
+$~
+")
+                    .as_bytes(),
+            );
+            d
+        };
+        // Drink container with a maximal capacity: no panic, weight pinned.
+        let w = parse(&body("17", "2147483647"));
+        assert_eq!(w.obj_protos[0].values[1], i32::MAX);
+        assert_eq!(w.obj_protos[0].weight, i32::MAX);
+        // Fountains take the same path.
+        let w = parse(&body("23", "2147483647"));
+        assert_eq!(w.obj_protos[0].weight, i32::MAX);
+        // Ordinary capacity: still exactly value[1] + 5.
+        let w = parse(&body("17", "40"));
+        assert_eq!(w.obj_protos[0].weight, w.obj_protos[0].values[1] + 5);
+        assert_eq!(w.obj_protos[0].weight, 45);
     }
 
     /// The T line's first token is scanned with a width, so an over-long one
