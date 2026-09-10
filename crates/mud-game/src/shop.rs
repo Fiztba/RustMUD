@@ -1168,7 +1168,8 @@ fn shopping_identify(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, sho
     {
         let weight = obj_weight(g, obj);
         let sellp = sell_price(g, obj, shop_idx, keeper, chid);
-        let buyp = buy_price(g, obj, shop_idx, keeper, chid);
+        let quest_item = g.obj(obj).obj_flagged(flags::ITEM_QUEST);
+        let buyp = if quest_item { g.obj(obj).cost } else { buy_price(g, obj, shop_idx, keeper, chid) };
         let qyel = cc(g, chid, C_SPR, KYEL);
         let qnrm = cc(g, chid, C_SPR, KNRM);
         let mut msg = format!("Weight: {}, Cost to Sell: ", weight).into_bytes();
@@ -1178,6 +1179,7 @@ fn shopping_identify(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, sho
         msg.extend_from_slice(b", Cost to Buy: ");
         msg.extend_from_slice(qyel);
         msg.extend_from_slice(format!("{}", buyp).as_bytes());
+        if quest_item { msg.extend_from_slice(b" qp"); }
         msg.extend_from_slice(qnrm);
         msg.extend_from_slice(b"\r\n");
         send_to_char(g, chid, &msg);
