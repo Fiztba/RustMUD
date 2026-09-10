@@ -392,8 +392,7 @@ pub fn remove_room_resets(zone: &mut Zone, rnum: Idx) -> bool {
     for cmd in &mut zone.cmds {
         let mut remove = cmd.if_flag != 0 && previous_removed;
         let room = match cmd.command {
-            b'M' | b'O' => Some(&mut cmd.arg3),
-            b'T' | b'V' if cmd.arg1 == crate::dg::WLD_TRIGGER => Some(&mut cmd.arg3),
+            b'M' | b'O' | b'T' | b'V' => Some(&mut cmd.arg3),
             b'D' | b'R' => Some(&mut cmd.arg1),
             _ => None,
         };

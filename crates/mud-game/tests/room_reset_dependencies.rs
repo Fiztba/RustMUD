@@ -72,3 +72,32 @@ fn deleting_a_room_does_not_retarget_its_mobile_equipment_resets() {
     assert!(!equipped, "deleted room's G command equipped the preceding mobile");
     assert_eq!(g.olc[&di].zone.as_ref().unwrap().cmds[2].command, b'*');
 }
+
+#[test]
+fn dependent_resets_stop_until_an_independent_target_is_loaded() {
+    use mud_game::dg::{MOB_TRIGGER, OBJ_TRIGGER};
+    use mud_world::model::{Zone, ZoneCommand};
+    let cmd = |command, arg1, arg3, if_flag| ZoneCommand { command, arg1, arg3, if_flag, ..Default::default() };
+    let mut zone = Zone { cmds: vec![
+        cmd(b'M', 0, 1, 0),
+        cmd(b'T', MOB_TRIGGER, NOWHERE as i32, 0),
+        cmd(b'G', 0, 0, 0),
+        cmd(b'T', OBJ_TRIGGER, NOWHERE as i32, 0),
+        cmd(b'E', 0, 0, 0),
+        cmd(b'O', 0, 2, 1),
+        cmd(b'P', 0, 0, 1),
+        cmd(b'M', 0, 3, 0),
+        cmd(b'G', 0, 0, 0),
+        cmd(b'T', OBJ_TRIGGER, NOWHERE as i32, 0),
+        cmd(b'O', 0, 1, 0),
+        cmd(b'V', OBJ_TRIGGER, NOWHERE as i32, 0),
+        cmd(b'O', 0, 2, 0),
+        cmd(b'T', OBJ_TRIGGER, NOWHERE as i32, 0),
+    ], ..Default::default() };
+    assert!(mud_game::olc::genzon::remove_room_resets(&mut zone, 1));
+    let commands: Vec<_> = zone.cmds.iter().map(|c| c.command).collect();
+    assert_eq!(commands, b"*******MGT**OT");
+    assert_eq!(zone.cmds[7].arg3, 2);
+    assert_eq!(zone.cmds[12].arg3, 1);
+    assert_eq!(zone.cmds[13].arg3, NOWHERE as i32);
+}
