@@ -930,19 +930,7 @@ pub fn do_give(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd
 // ---- drink containers ----
 
 pub fn weight_change_object(g: &mut Game, oid: ObjId, weight: i32) {
-    if g.obj(oid).in_room != NOWHERE {
-        g.obj_mut(oid).weight += weight;
-    } else if let Some(tmp_ch) = g.obj(oid).carried_by {
-        obj_from_char(g, oid);
-        g.obj_mut(oid).weight += weight;
-        obj_to_char(g, oid, tmp_ch);
-    } else if let Some(tmp_obj) = g.obj(oid).in_obj {
-        obj_from_obj(g, oid);
-        g.obj_mut(oid).weight += weight;
-        obj_to_obj(g, oid, tmp_obj);
-    } else {
-        g.log("SYSERR: Unknown attempt to subtract weight from an object.".to_string());
-    }
+    handler::change_object_weight(g, oid, weight);
 }
 
 fn limited_drink_container(g: &Game, oid: ObjId) -> bool {

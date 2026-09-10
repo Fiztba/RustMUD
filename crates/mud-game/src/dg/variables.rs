@@ -1328,8 +1328,11 @@ fn obj_field(g: &mut Game, _ctx: DgCtx, o: ObjId, field: &[u8], subfield: &[u8])
         }
     } else if eq_ci(field, b"weight") {
         if has_sub {
-            let ob = g.obj_mut(o);
-            ob.weight = 1.max(atoi32(subfield) + ob.weight);
+            let old_weight = g.obj(o).weight;
+            let new_weight = old_weight.saturating_add(atoi32(subfield)).max(1);
+            if let Some(delta) = new_weight.checked_sub(old_weight) {
+                crate::handler::change_object_weight(g, o, delta);
+            }
         }
         Some(g.obj(o).weight.to_string().into_bytes())
     } else if eq_ci(field, b"worn_by") {
