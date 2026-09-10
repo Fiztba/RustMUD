@@ -1,5 +1,5 @@
 //! The line editor: the buffer-append half of `string_add` plus
-//! the entire improved editor â€” `improved_editor_execute`,
+//! the entire improved editor — `improved_editor_execute`,
 //! `parse_edit_action`, `format_text`, `replace_str`, and the
 //! `parse_at`/`parse_tab`/`smash_tilde` helpers.
 //!
@@ -295,7 +295,7 @@ fn itoa(v: i32) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------------------------
-// string_add â€” the buffer-append half
+// string_add — the buffer-append half
 // ---------------------------------------------------------------------------
 
 /// Feed one input line to the editor. Returns the resulting action and the
@@ -819,7 +819,7 @@ fn parse_edit_action(
                 }
                 let tail_from = s.and_then(|p| find_nl(buf, p));
                 if let Some(q) = tail_from {
-                    // while (*(++s)) *(t++) = *s; â€” shift the tail after
+                    // while (*(++s)) *(t++) = *s; — shift the tail after
                     // line_high's '\n' down to t, then terminate.
                     let tail: Vec<u8> = buf[q + 1..].to_vec();
                     buf.truncate(t);
@@ -1239,7 +1239,7 @@ fn format_text(eb: &mut EditBuf, mode: i32, low: i32, high: i32, msgs: &mut Vec<
         match find_nl(&orig, fpos) {
             Some(q) => fpos = q + 1,
             None => {
-                // No newline left to advance past â€” treat as "not enough
+                // No newline left to advance past — treat as "not enough
                 // lines".
                 msgs.push(b"There aren't that many lines!\r\n".to_vec());
                 return 0;
@@ -1939,7 +1939,7 @@ mod tests {
     #[test]
     fn format_invalid_range_uses_literal_backslash_message() {
         // This message carries a literal backslash-r backslash-n, not a
-        // CRLF â€” that is what the player receives.
+        // CRLF — that is what the player receives.
         let mut eb = three_lines();
         let (_, m, _) = add(&mut eb, b"/f 2 - 1");
         assert_eq!(m, vec![b"That range is invalid.\\r\\n".to_vec()]);
