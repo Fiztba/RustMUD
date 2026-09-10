@@ -211,6 +211,15 @@ pub fn do_copyover(g: &mut Game, chid: CharId, _argument: &[u8], _cmd: usize, _s
     g.copyover = Some(plan);
 }
 
+/// Take the requested handoff after the current game pulse has finished.
+/// Houses may have changed since the command ran, and the successor reloads
+/// their contents from disk just like a normal boot.
+pub fn take_copyover_plan(g: &mut Game) -> Option<CopyoverPlan> {
+    let plan = g.copyover.take()?;
+    crate::house::house_save_all(g);
+    Some(plan)
+}
+
 /// Serialize copyover.dat.
 pub fn write_copyover_file(g: &Game, plan: &CopyoverPlan, listener_blob: &[u8]) -> std::io::Result<()> {
     let mut out = format!("{}\n", plan.boot_time).into_bytes();

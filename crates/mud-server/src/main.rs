@@ -909,7 +909,7 @@ fn perform_copyover(
     logname: Option<&str>,
     logger: &mut Logger,
 ) {
-    let Some(plan) = g.copyover.take() else { return };
+    let Some(plan) = mud_game::copyover::take_copyover_plan(g) else { return };
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from(&args[0]));
 
     // Every process-image replacement leaves the working directory alone; the
