@@ -58,10 +58,15 @@ fn body_part_social_reaches_actor_target_and_observer() {
     }
     g.rooms[0].light = 1;
     let cmd = mud_game::interpreter::find_command(g, b"waves").unwrap();
-    mud_game::act::social::do_action(g, actor, b"Target hand", cmd, 0);
-    for di in descriptors {
-        let out = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
-        assert!(out.contains("hand") && !out.contains("<NULL>"), "{out}");
+    for part in [b"hand".as_slice(), b"$n"] {
+        for &di in &descriptors { g.descriptors.get_mut(di).unwrap().output.clear(); }
+        let mut args = b"Target ".to_vec(); args.extend_from_slice(part);
+        mud_game::act::social::do_action(g, actor, &args, cmd, 0);
+        for &di in &descriptors {
+            let out = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
+            assert!(out.contains(std::str::from_utf8(part).unwrap()) && !out.contains("<NULL>"), "{out}");
+            assert_eq!(out.lines().filter(|line| !line.is_empty()).count(), 1, "{out}");
+        }
     }
 }
 #[test]
