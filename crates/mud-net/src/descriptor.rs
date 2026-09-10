@@ -453,7 +453,7 @@ impl Descriptor {
                 idx += 1;
             }
             // Notify whenever input remained.
-            if truncated_at.is_some() {
+            if truncated_at.is_some() && !self.echo_suppressed {
                 let mut msg = b"Line too long.  Truncated to:\r\n".to_vec();
                 msg.extend_from_slice(&tmp);
                 msg.extend_from_slice(b"\r\n");
@@ -473,7 +473,9 @@ impl Descriptor {
             }
 
             let mut failed_subst = false;
-            if tmp.first() == Some(&b'!') && tmp.len() == 1 {
+            if self.echo_suppressed {
+                // Passwords are literal input: never expand or update history.
+            } else if tmp.first() == Some(&b'!') && tmp.len() == 1 {
                 tmp = self.last_input.clone();
             } else if tmp.first() == Some(&b'!') {
                 // History recall by abbreviation.
@@ -508,15 +510,13 @@ impl Descriptor {
                         failed_subst = true;
                     }
                 }
-            } else if self.echo_suppressed {
-                // An echo-off line is not remembered at all.
             } else {
                 self.last_input = tmp.clone();
                 self.history[self.history_pos] = tmp.clone();
                 self.history_pos = (self.history_pos + 1) % HISTORY_SIZE;
             }
 
-            if tmp == b"--" {
+            if !self.echo_suppressed && tmp == b"--" {
                 let _ = self.write_to_output(b"All queued commands cancelled.\r\n", true, stats);
                 self.flush_queues();
                 failed_subst = true;
@@ -952,6 +952,52 @@ mod tests {
         d.feed_input_test(b"north\r\n!\r\n").unwrap();
         assert_eq!(d.input.pop_front().unwrap().0, b"north");
         assert_eq!(d.input.pop_front().unwrap().0, b"north");
+    }
+
+    #[test]
+    fn password_input_is_literal_and_never_changes_history() {
+        for password in [b"!".as_slice(), b"!north", b"^north^secret", b"--"] {
+            let mut d = desc();
+            d.feed_input_test(b"north\r\n").unwrap();
+            d.input.clear();
+            d.snoop_input.clear();
+            let history = d.history.clone();
+            let history_pos = d.history_pos;
+            let mut stats = BufStats::default();
+            d.echo_off(&mut stats);
+            d.output.clear();
+            let mut wire = password.to_vec();
+            wire.extend_from_slice(b"\r\n");
+            d.feed_input_test(&wire).unwrap();
+            assert_eq!(d.input.pop_front().unwrap().0, password);
+            assert_eq!(d.last_input, b"north");
+            assert_eq!(d.history, history);
+            assert_eq!(d.history_pos, history_pos);
+            assert!(d.snoop_input.is_empty());
+            assert!(d.output.is_empty());
+        }
+    }
+
+    #[test]
+    fn overlong_password_is_not_echoed_to_the_socket() {
+        use std::net::{TcpListener, TcpStream};
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        client.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        server.set_nonblocking(true).unwrap();
+        let mut d = Descriptor::new(Some(mio::net::TcpStream::from_std(server)), b"localhost", 1, 0, false);
+        d.echo_suppressed = true;
+        let mut password = vec![b's'; MAX_INPUT_LENGTH + 10];
+        password.push(b'\n');
+        d.feed_input_test(&password).unwrap();
+        assert_eq!(d.input.len(), 1);
+        assert!(d.last_input.is_empty());
+        assert!(d.snoop_input.is_empty());
+        let error = client.read(&mut [0; 1024]).unwrap_err();
+        assert!(matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut));
     }
 
     #[test]
