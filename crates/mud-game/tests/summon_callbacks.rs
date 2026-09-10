@@ -79,8 +79,9 @@ fn summon_case(mode: u8) {
     let zombie = g.world.real_mobile(11).unwrap();
     g.world.mob_protos[zombie as usize].keywords = Some(b"servant".to_vec());
     g.world.mob_protos[zombie as usize].proto_script.clear();
-    listener(g, if mode == 2 { b"never" } else { b"animates" },
-        &[if mode == 0 { b"mpurge corpse" } else { b"mpurge servant" }]);
+    let verb = match mode { 2 => b"never".as_slice(), 4 => b"starts", _ => b"animates" };
+    let body = match mode { 0 | 4 => b"mpurge corpse".as_slice(), 3 => b"mforce %actor% get corpse", _ => b"mpurge servant" };
+    listener(g, verb, &[body]);
     let corpse = item(g, b"corpse"); g.obj_mut(corpse).type_flag = flags::ITEM_CONTAINER;
     g.obj_mut(corpse).values[3] = 1; obj_to_room(g, corpse, 0);
     let gem = item(g, b"gem"); obj_to_obj(g, gem, corpse);
@@ -97,13 +98,23 @@ fn summon_case(mode: u8) {
         assert_eq!(g.ch(summoned).master, None);
         assert!(g.try_obj(corpse).is_some());
         assert_eq!(g.obj(gem).in_obj, Some(corpse));
+    } else if mode == 3 {
+        assert_eq!(g.obj(corpse).carried_by, Some(actor));
+        assert_eq!(g.obj(gem).in_obj, Some(corpse));
+        assert_eq!(g.ch(summoned).master, Some(actor));
     } else {
         assert!(g.try_obj(corpse).is_none());
         assert_eq!(g.ch(summoned).master, Some(actor));
-        if mode == 0 { assert!(g.try_obj(gem).is_none()); }
+        if mode == 0 || mode == 4 { assert!(g.try_obj(gem).is_none()); }
         else { assert_eq!(g.obj(gem).carried_by, Some(summoned)); }
+        let count = g.character_list.len();
+        mud_game::magic::mag_summons(g, 20, actor, Some(corpse), mud_data::spells::SPELL_ANIMATE_DEAD, 0);
+        assert_eq!(g.character_list.len(), count);
     }
 }
 #[test] fn animation_survives_corpse_removal_during_its_announcement() { summon_case(0); }
 #[test] fn a_removed_summon_does_not_take_the_corpses_contents() { summon_case(1); }
 #[test] fn normal_animation_transfers_contents_and_adds_a_follower() { summon_case(2); }
+
+#[test] fn a_relocated_corpse_keeps_its_contents() { summon_case(3); }
+#[test] fn follower_announcement_corpse_removal_is_safe() { summon_case(4); }
