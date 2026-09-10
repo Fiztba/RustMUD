@@ -323,7 +323,7 @@ fn list_detailed_shop(g: &mut Game, chid: CharId, shop_nr: usize) {
                     "Coins:      [{:9}], Bank: [{:9}] (Total: {})\r\n",
                     gold,
                     bank,
-                    gold + bank
+                    i64::from(gold) + i64::from(bank)
                 )
                 .as_bytes(),
             );
