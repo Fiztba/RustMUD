@@ -63,6 +63,15 @@ fn lists_include_the_only_entry_in_each_world_table() {
         mud_game::interpreter::command_interpreter(g, actor, command.as_bytes());
         let output = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
         assert!(output.contains(expected), "{command}: {output}");
+        let kind = command.split_whitespace().next().unwrap();
+        g.descriptors.get_mut(di).unwrap().output.clear();
+        mud_game::interpreter::command_interpreter(g, actor, format!("{kind} 65534 65534").as_bytes());
+        let output = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
+        assert!(output.contains(if kind == "rlist" { "No rooms found" } else { "None found" }), "empty range for {kind}: {output}");
+        g.descriptors.get_mut(di).unwrap().output.clear();
+        mud_game::interpreter::command_interpreter(g, actor, format!("{kind} 100 0").as_bytes());
+        let output = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
+        assert!(output.contains("Aren't we funny"), "reversed range for {kind}: {output}");
     }
 }
 #[test]
@@ -74,7 +83,7 @@ fn list_help_and_name_search_work_without_zone_zero() {
     for zone in &mut g.world.zones { if zone.number == 0 { zone.number = 60000; } }
     g.world.obj_protos[0].name = Some(b"uniquelisting".to_vec());
     g.world.obj_protos[0].short_description = Some(b"unique object result".to_vec());
-    for (command, expected) in [("mlist help", "Usage:"), ("olist help", "Usage:"), ("olist uniquelisting", "unique object result")] {
+    for (command, expected) in [("mlist help", "Usage:"), ("mlist h", "Usage:"), ("mlist flags", "Which mobile flag"), ("mlist level", "Which mobile flag"), ("olist help", "Usage:"), ("olist uniquelisting", "unique object result")] {
         g.descriptors.get_mut(di).unwrap().output.clear();
         mud_game::interpreter::command_interpreter(g, actor, command.as_bytes());
         let output = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
