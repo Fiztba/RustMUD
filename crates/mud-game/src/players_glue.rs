@@ -350,10 +350,8 @@ pub fn load_char_into(g: &mut Game, chid: CharId, name: &[u8]) -> Option<usize> 
             }
         }
     }
-    // Vars: -> read_saved_vars_ascii: skipped entirely if
-    // SCRIPT(ch) already exists (the Vars-after-Trig desync lives in the
-    // parser, which stops consuming payload lines in that case).
-    if !pf.vars.is_empty() && g.ch(chid).script.is_none() {
+    // Saved globals belong to the script even when triggers created it first.
+    if !pf.vars.is_empty() {
         let go = crate::dg::GoId::Char(chid);
         let vars = pf.vars.clone();
         let sc = g.ensure_script(go);
