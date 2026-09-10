@@ -1056,8 +1056,9 @@ fn list_object(
 
     // " %2d) %9s %-*s %6d%s\r\n" with * = count_color_chars + 48.
     let width = count_color_chars(&itemname) + 48;
-    let price = buy_price(g, oid, shop_idx, keeper, chid);
-    let qp = if g.obj(oid).obj_flagged(flags::ITEM_QUEST) { " qp" } else { "" };
+    let quest_item = g.obj(oid).obj_flagged(flags::ITEM_QUEST);
+    let price = if quest_item { g.obj(oid).cost } else { buy_price(g, oid, shop_idx, keeper, chid) };
+    let qp = if quest_item { " qp" } else { "" };
     let mut line = format!(" {:>2})  {:>9}   ", aindex, quantity).into_bytes();
     let mut padded = itemname.clone();
     while padded.len() < width {
@@ -1115,7 +1116,7 @@ fn shopping_list(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_id
     lindex += 1;
     match last_obj {
         None => send_to_char(g, chid, b"Currently, there is nothing for sale.\r\n"),
-        Some(_) if !name.is_empty() && !found => {
+        Some(lo) if !name.is_empty() && !found && !isname(&name, obj_name(g, lo)) => {
             send_to_char(g, chid, b"Presently, none of those are for sale.\r\n")
         }
         Some(lo) => {
