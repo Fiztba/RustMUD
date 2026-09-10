@@ -579,6 +579,9 @@ fn is_corpse(g: &Game, oid: ObjId) -> bool {
 
 /// mag_summons — clone and animate dead.
 pub fn mag_summons(g: &mut Game, _level: i32, chid: CharId, obj: Option<ObjId>, spellnum: i32, _savetype: i32) {
+    let character_available = |g: &Game, id| g.try_ch(id).is_some_and(|ch|
+        !ch.plr(flags::PLR_NOTDEADYET) && !ch.mob_flagged(flags::MOB_NOTDEADYET));
+    let corpse_location = obj.and_then(|o| g.try_obj(o).map(|o| (o.carried_by, o.in_obj, o.in_room)));
     let pfail;
     let msg;
     let fmsg;
@@ -598,7 +601,7 @@ pub fn mag_summons(g: &mut Game, _level: i32, chid: CharId, obj: Option<ObjId>, 
             }
         }
         SPELL_ANIMATE_DEAD => {
-            if obj.is_none() || !is_corpse(g, obj.unwrap()) {
+            if obj.is_none_or(|o| g.try_obj(o).is_none() || !is_corpse(g, o)) {
                 act(g, MAG_SUMMON_FAIL_MSGS[7], false, Some(chid), None, None, comm::TO_CHAR);
                 return;
             }
@@ -641,8 +644,11 @@ pub fn mag_summons(g: &mut Game, _level: i32, chid: CharId, obj: Option<ObjId>, 
             g.ch_mut(m).short_descr = Some(name);
         }
         act_char2(g, MAG_SUMMON_MSGS[msg], false, chid, m, comm::TO_ROOM);
+        if !character_available(g, m) || !character_available(g, chid) { return; }
         crate::dg::triggers::load_mtrigger(g, m);
+        if !character_available(g, m) || !character_available(g, chid) { return; }
         crate::act::movement::add_follower(g, m, chid);
+        if !character_available(g, m) || !character_available(g, chid) { return; }
 
         if let Some(gr) = g.group_of(chid) {
             if gr.leader == Some(chid) {
@@ -653,6 +659,7 @@ pub fn mag_summons(g: &mut Game, _level: i32, chid: CharId, obj: Option<ObjId>, 
     }
     if handle_corpse {
         let corpse = obj.unwrap();
+        if g.try_obj(corpse).map(|o| (o.carried_by, o.in_obj, o.in_room)) != corpse_location { return; }
         if let Some(m) = mob {
             let contents = g.obj(corpse).contains.clone();
             for tobj in contents {
