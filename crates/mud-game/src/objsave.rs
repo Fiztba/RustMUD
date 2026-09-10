@@ -441,7 +441,8 @@ pub fn crash_is_unrentable(g: &mut Game, oid: ObjId) -> bool {
         (
             o.extra_flags.is_set(flags::ITEM_NORENT),
             o.cost_per_day,
-            o.item_number == NOTHING,
+            // Mail notes have no world prototype, but must survive rent.
+            o.item_number == NOTHING && o.type_flag != flags::ITEM_NOTE,
             o.type_flag == flags::ITEM_KEY,
         )
     };
