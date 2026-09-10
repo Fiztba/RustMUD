@@ -346,10 +346,12 @@ impl Descriptor {
 
         let written = write(self, &payload[send_from..])?;
         // Snoop the content once; resumed bytes must not duplicate the snoop.
-        let mut copy = b"% ".to_vec();
-        copy.extend_from_slice(&self.output);
-        copy.extend_from_slice(b"%%");
-        self.snoop_output = Some(copy);
+        if !self.output.is_empty() {
+            let mut copy = b"% ".to_vec();
+            copy.extend_from_slice(&self.output);
+            copy.extend_from_slice(b"%%");
+            self.snoop_output = Some(copy);
+        }
         self.output = payload[send_from + written..].to_vec();
         self.pending_output = self.output.len();
         self.overflowed = false;
@@ -1232,6 +1234,7 @@ mod tests {
             sent.extend_from_slice(bytes); Ok(bytes.len())
         }).unwrap();
         assert_eq!(sent, b"> ");
+        assert!(d.snoop_output.is_none());
         assert!(d.output.is_empty());
     }
 
