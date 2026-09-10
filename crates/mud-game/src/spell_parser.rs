@@ -223,20 +223,31 @@ pub fn call_magic(
         return 0;
     }
 
+    let char_available = |g: &Game, id| g.try_ch(id).is_some_and(|ch|
+        !ch.plr(flags::PLR_NOTDEADYET) && !ch.mob_flagged(flags::MOB_NOTDEADYET));
+    let targets_exist = |g: &Game| char_available(g, caster)
+        && cvict.is_none_or(|v| char_available(g, v))
+        && ovict.is_none_or(|o| g.try_obj(o).is_some());
+    if !targets_exist(g) { return 0; }
+
     // Cast triggers: wld, then obj, then mob.
     if crate::dg::triggers::cast_wtrigger(g, caster, cvict, ovict, spellnum) == 0 {
         return 0;
     }
+    if !targets_exist(g) { return 0; }
     if let Some(ov) = ovict {
         if crate::dg::triggers::cast_otrigger(g, caster, ov, spellnum) == 0 {
             return 0;
         }
     }
+    if !targets_exist(g) { return 0; }
     if let Some(cv) = cvict {
         if crate::dg::triggers::cast_mtrigger(g, caster, cv, spellnum) == 0 {
             return 0;
         }
     }
+
+    if !targets_exist(g) { return 0; }
 
     let room = g.ch(caster).in_room;
     let room_flag = |g: &Game, bit: usize| {
@@ -342,7 +353,11 @@ pub fn mag_objectmagic(g: &mut Game, chid: CharId, oid: ObjId, argument: &[u8]) 
         FIND_CHAR_ROOM | FIND_OBJ_INV | FIND_OBJ_ROOM | FIND_OBJ_EQUIP,
     );
 
-    let otype = g.obj(oid).type_flag;
+    let Some(item) = g.try_obj(oid) else { return };
+    let otype = item.type_flag;
+    let source = (item.carried_by, item.worn_by, item.in_obj, item.in_room);
+    let item_is_usable = |g: &Game| g.try_obj(oid).is_some_and(|o|
+        o.type_flag == otype && (o.carried_by, o.worn_by, o.in_obj, o.in_room) == source);
     match otype {
         flags::ITEM_STAFF => {
             act(g, b"You tap $p three times on the ground.", false, Some(chid), Some(oid), None, comm::TO_CHAR);
@@ -353,6 +368,7 @@ pub fn mag_objectmagic(g: &mut Game, chid: CharId, oid: ObjId, argument: &[u8]) 
                 act(g, b"$n taps $p three times on the ground.", false, Some(chid), Some(oid), None, comm::TO_ROOM);
             }
 
+            if !item_is_usable(g) { return; }
             if g.obj(oid).values[2] <= 0 {
                 send_to_char(g, chid, b"It seems powerless.\r\n");
                 act(g, b"Nothing seems to happen.", false, Some(chid), Some(oid), None, comm::TO_ROOM);
@@ -407,6 +423,7 @@ pub fn mag_objectmagic(g: &mut Game, chid: CharId, oid: ObjId, argument: &[u8]) 
                 return;
             }
 
+            if !item_is_usable(g) { return; }
             if g.obj(oid).values[2] <= 0 {
                 send_to_char(g, chid, b"It seems powerless.\r\n");
                 act(g, b"Nothing seems to happen.", false, Some(chid), Some(oid), None, comm::TO_ROOM);
@@ -444,17 +461,19 @@ pub fn mag_objectmagic(g: &mut Game, chid: CharId, oid: ObjId, argument: &[u8]) 
                 act(g, b"$n recites $p.", false, Some(chid), Some(oid), None, comm::TO_ROOM);
             }
 
+            if !item_is_usable(g) { return; }
             g.ch_mut(chid).wait = PULSE_VIOLENCE as i32;
             let (v0, v1, v2, v3) = {
                 let o = g.obj(oid);
                 (o.values[0], o.values[1], o.values[2], o.values[3])
             };
             for spell in [v1, v2, v3] {
+                if !item_is_usable(g) { break; }
                 if call_magic(g, chid, tch, tobj, spell, v0, CAST_SCROLL) <= 0 {
                     break;
                 }
             }
-            if g.try_obj(oid).is_some() {
+            if item_is_usable(g) {
                 crate::handler::extract_obj(g, oid);
             }
         }
@@ -463,7 +482,7 @@ pub fn mag_objectmagic(g: &mut Game, chid: CharId, oid: ObjId, argument: &[u8]) 
             if crate::dg::triggers::consume_otrigger(g, oid, chid, crate::dg::OCMD_QUAFF) == 0 {
                 return;
             }
-            if g.try_obj(oid).is_none() {
+            if !item_is_usable(g) {
                 return;
             }
 
@@ -475,17 +494,19 @@ pub fn mag_objectmagic(g: &mut Game, chid: CharId, oid: ObjId, argument: &[u8]) 
                 act(g, b"$n quaffs $p.", true, Some(chid), Some(oid), None, comm::TO_ROOM);
             }
 
+            if !item_is_usable(g) { return; }
             g.ch_mut(chid).wait = PULSE_VIOLENCE as i32;
             let (v0, v1, v2, v3) = {
                 let o = g.obj(oid);
                 (o.values[0], o.values[1], o.values[2], o.values[3])
             };
             for spell in [v1, v2, v3] {
+                if !item_is_usable(g) { break; }
                 if call_magic(g, chid, Some(chid), None, spell, v0, CAST_POTION) <= 0 {
                     break;
                 }
             }
-            if g.try_obj(oid).is_some() {
+            if item_is_usable(g) {
                 crate::handler::extract_obj(g, oid);
             }
         }
