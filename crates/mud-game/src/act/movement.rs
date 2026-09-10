@@ -287,10 +287,10 @@ pub fn do_simple_move(g: &mut Game, chid: CharId, dir: usize, need_specials_chec
         char_from_room(g, chid);
         char_to_room(g, chid, was_in);
         look_at_room(g, chid, false);
-    } else {
-        crate::dg::triggers::greet_memory_mtrigger(g, chid);
+        return false;
     }
-    true
+    crate::dg::triggers::greet_memory_mtrigger(g, chid);
+    move_still_in_room(g, chid, going_to)
 }
 
 pub fn perform_move(g: &mut Game, chid: CharId, dir: i32, need_specials_check: bool) -> bool {
