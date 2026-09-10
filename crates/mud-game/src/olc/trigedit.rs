@@ -190,19 +190,7 @@ pub fn dg_script_edit_parse(g: &mut Game, di: usize, olc: &mut OlcData, arg: &[u
                     return true;
                 }
                 let mut list = olc.script.clone().unwrap_or_default();
-                if pos == 1 || list.is_empty() {
-                    list.insert(0, vnum as Idx);
-                } else {
-                    let mut idx = 0usize;
-                    let mut p = pos;
-                    while idx + 1 < list.len() && {
-                        p -= 1;
-                        p != 0
-                    } {
-                        idx += 1;
-                    }
-                    list.insert(idx + 1, vnum as Idx);
-                }
+                list.insert(((pos - 1) as usize).min(list.len()), vnum as Idx);
                 olc.script = Some(list);
                 olc.value += 1;
             }
@@ -870,10 +858,8 @@ pub fn trigedit_parse(
         }
 
         TRIGEDIT_INTENDED => {
-            // The guard `>= MOB_TRIGGER || <= WLD_TRIGGER` is true for
-            // every integer, so any number lands in attach_type.
             let v = atoi(arg);
-            if v >= crate::dg::MOB_TRIGGER || v <= crate::dg::WLD_TRIGGER {
+            if (crate::dg::MOB_TRIGGER..=crate::dg::WLD_TRIGGER).contains(&v) {
                 if let Some(t) = olc.trig.as_mut() {
                     t.attach_type = v;
                 }
@@ -915,7 +901,10 @@ pub fn trigedit_parse(
 
         TRIGEDIT_COPY => {
             match g.world.real_trigger(atoi(arg) as Idx) {
-                Some(i) => trigedit_setup_existing(g, &mut olc, i as usize),
+                Some(i) => {
+                    trigedit_setup_existing(g, &mut olc, i as usize);
+                    olc.value = 1;
+                }
                 None => write_to_desc(g, di, b"That trigger does not exist.\r\n"),
             }
         }
@@ -1138,6 +1127,7 @@ fn refresh_live_triggers(g: &mut Game, rnum: Idx, proto: &Trigger) {
                 t.narg = proto.narg;
                 t.depth = 0;
             }
+            sc.types = sc.trig_list.iter().fold(0, |types, t| types | t.trigger_type);
         }
         // event_cancel: the queued TrigWait dies with the reload.
         g.events.retain(|e| match e.kind {
@@ -1170,6 +1160,16 @@ fn live_script_owners(g: &Game) -> Vec<crate::dg::GoId> {
     for id in g.character_list.iter() {
         if g.try_ch(*id).is_some_and(|c| c.script.is_some()) {
             out.push(crate::dg::GoId::Char(*id));
+        }
+    }
+    // Players may already have loaded scripts while still at the login menu.
+    for di in g.descriptors.indices() {
+        let Some(d) = g.descriptors.get(di) else { continue };
+        for id in [d.character, d.original].into_iter().flatten() {
+            let go = crate::dg::GoId::Char(id);
+            if g.try_ch(id).is_some_and(|c| c.script.is_some()) && !out.contains(&go) {
+                out.push(go);
+            }
         }
     }
     for id in g.object_list.iter() {
@@ -1256,12 +1256,7 @@ pub fn delete_trigger(g: &mut Game, rnum: Idx) -> bool {
             continue;
         }
         live += n;
-        // A script whose last trigger has been removed is extracted here: an
-        // empty trig_list is a state nothing else in the game produces, and
-        // nothing downstream expects it.
-        if g.script_of(go).is_some_and(|sc| sc.trig_list.is_empty()) {
-            crate::dg::extract_script(g, go);
-        }
+        // Keep the container and global variables, as remove_trigger does.
     }
 
     // 2. Stop the prototypes handing it out again on the next load, and mark
