@@ -33,9 +33,20 @@ fn field_arguments_are_local_to_each_expansion() {
     let g = &mut f.game;
     let go = GoId::Room(0);
     dg::add_var(&mut g.ensure_script(go).global_vars, b"text", b"abcdef", 0);
-    let ctx = dg::DgCtx { go, iid: 0 };
+    let nr = g.world.triggers.len() as u16;
+    g.world.triggers.push(mud_world::model::Trigger {
+        vnum: 65000, attach_type: dg::WLD_TRIGGER, ..Default::default()
+    });
+    let trigger = dg::read_trigger(g, nr).unwrap();
+    let ctx = dg::DgCtx { go, iid: trigger.iid };
+    dg::add_trigger_at(g.ensure_script(go), trigger, -1);
     assert_eq!(dg::variables::var_subst(g, ctx, b"%text.charat(1)% %text.charat(2)%"), b"a b");
     assert_eq!(dg::variables::var_subst(g, ctx, b"%text.charat(2)% %text.charat(1)%"), b"b a");
+    dg::add_var(&mut g.ensure_script(go).global_vars, b"index", b"2", 0);
+    assert_eq!(dg::variables::var_subst(g, ctx, b"%text.charat(%index%)% %text.charat(1)%"), b"b a");
+    assert_eq!(dg::variables::var_subst(g, ctx, b"%text.charat(2).charat(1)%"), b"b");
+    assert_eq!(dg::variables::var_subst(g, ctx, b"%text.charat(%index%).charat(1)% %text.strlen%"), b"b 6");
+    assert_eq!(dg::variables::var_subst(g, ctx, b"%% %text.charat(1)% %text%"), b"% a abcdef");
 }
 
 #[test]
@@ -46,4 +57,9 @@ fn text_comparisons_and_searches_handle_order_and_overlaps() {
     assert!(dg::variables::str_str(b"aaab", b"aab"));
     assert!(dg::triggers::is_substring(b"he", b"the he"));
     assert!(!dg::triggers::is_substring(b"he", b"the"));
+    assert!(dg::triggers::is_substring(b"HE", b"the, he!"));
+    assert!(!dg::variables::str_str(b"abc", b"abcd"));
+    assert!(!dg::variables::str_str(b"abc", b""));
+    assert_eq!(dg::expr::eval_op(b">=", b"10", b"2"), b"1");
+    assert_eq!(dg::expr::eval_op(b">=", b"-2", b"-1"), b"0");
 }

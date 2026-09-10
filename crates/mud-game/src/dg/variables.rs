@@ -1618,10 +1618,8 @@ pub fn var_subst(g: &mut Game, ctx: DgCtx, line: &[u8]) -> BStr {
         v
     };
 
-    // subfield: one buffer and a running pointer, NEVER reset between
-    // %groups%.
+    // Reuse the allocation, but isolate arguments between fields.
     let mut subfield = vec![0u8; 4096];
-    let mut subfield_p = 0usize;
     let sub_cstr = |s: &Vec<u8>| -> BStr {
         s.iter().take_while(|&&b| b != 0).copied().collect()
     };
@@ -1674,8 +1672,10 @@ pub fn var_subst(g: &mut Game, ctx: DgCtx, line: &[u8]) -> BStr {
                     subfield[subfield_p] = 0;
                     let var_s = read_cstr(&tmp, var_start);
                     let field_s = read_cstr(&tmp, field_start);
-                    let sub_s = sub_cstr(&subfield);
+                    let sub_s = var_subst(g, ctx, &sub_cstr(&subfield));
                     let repl = find_replacement(g, ctx, &var_s, &field_s, &sub_s);
+                    subfield_p = 0;
+                    subfield[0] = 0;
                     if !repl.is_empty() {
                         let mut eval_line = b"eval tmpvr ".to_vec();
                         eval_line.extend_from_slice(&repl);
