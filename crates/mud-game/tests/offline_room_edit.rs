@@ -62,11 +62,24 @@ fn offline_room_edits_do_not_leave_a_freed_player_in_the_room() {
     mud_game::act::wizset::do_set(g, admin, format!("file Target room {vnum}").as_bytes(), 0, 0);
     assert_eq!(g.rooms[0].people, original_people);
     assert!(String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output).contains("loadroom"));
+    mud_game::act::wizset::do_set(g, admin, format!("file Target roo {vnum}").as_bytes(), 0, 0);
+    assert_eq!(g.rooms[0].people, original_people);
+    mud_game::act::wizset::do_set(g, admin, format!("file Target loadroom {vnum}").as_bytes(), 0, 0);
     mud_game::act::wizset::do_set(g, admin, b"file Target gold 42", 0, 0);
     let loaded = mud_game::players_glue::load_char_offline(g, b"Target").unwrap();
     assert_eq!(g.ch(loaded).points.gold, 42);
     assert_eq!(g.ch(loaded).in_room, NOWHERE);
+    assert_eq!(g.ch(loaded).ps().load_room, vnum);
+    assert!(g.ch(loaded).plr(mud_data::flags::PLR_LOADROOM));
     mud_game::players_glue::free_offline_char(g, loaded);
     assert_eq!(g.rooms[0].people, original_people);
+    mud_game::act::wizset::do_set(g, admin, b"file Target loadroom off", 0, 0);
+    let live = mud_game::players_glue::load_char_offline(g, b"Target").unwrap();
+    assert!(!g.ch(live).plr(mud_data::flags::PLR_LOADROOM));
+    g.character_list.push_front(live); mud_game::handler::char_to_room(g, live, 1);
+    descriptor(g, live, ConState::Playing); g.rooms[0].light = 1; g.rooms[1].light = 1;
+    mud_game::act::wizset::do_set(g, admin, format!("player Target room {vnum}").as_bytes(), 0, 0);
+    assert_eq!(g.ch(live).in_room, 0);
+    assert!(g.rooms[0].people.contains(&live));
+    assert!(!g.rooms[1].people.contains(&live));
 }
-
