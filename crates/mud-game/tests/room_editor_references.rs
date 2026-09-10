@@ -49,7 +49,7 @@ fn descriptor(g: &mut Game, ch: mud_data::ids::CharId, state: ConState) -> usize
 
 #[test]
 fn inserting_a_copied_room_preserves_live_and_pending_references() {
-    use mud_game::{olc::OlcData, game::EventOwner};
+    use mud_game::{olc::OlcData, game::{EventOwner, EventKind}};
     use mud_world::model::{Exit, Zone, ZoneCommand};
     let mut f = fixture("insert");
     let g = &mut f.game;
@@ -84,6 +84,9 @@ fn inserting_a_copied_room_preserves_live_and_pending_references() {
     g.olc.insert(zone_di, Box::new(pending));
     let room_vnums: Vec<_> = g.world.rooms.iter().map(|r| r.vnum).collect();
     for r in 0..g.rooms.len() { g.event_lists.insert(EventOwner::Room(r as RoomRnum)); }
+    g.event_lists.insert(EventOwner::Char(builder));
+    g.queue_event(100, EventKind::SplDarkness { room: destination });
+    g.queue_event(100, EventKind::TrigWait { go: mud_game::dg::GoId::Room(destination), iid: 123, event_id: 456 });
     let source = g.real_room(2).unwrap();
     g.rooms[source as usize].light = 7;
     mud_game::olc::redit::do_oasis_redit(g, builder, b"1", 0, 0);
@@ -102,10 +105,27 @@ fn inserting_a_copied_room_preserves_live_and_pending_references() {
     assert_eq!(cmds[1].arg3, NOWHERE as i32);
     let other_room = g.real_room(3).unwrap();
     assert_eq!(g.world.rooms[other_room as usize].dir_option[NORTHWEST].as_ref().unwrap().to_room, destination);
-    for vnum in room_vnums {
+    for &vnum in &room_vnums {
         assert!(g.event_lists.contains(&EventOwner::Room(g.world.real_room(vnum).unwrap())), "lost event owner {vnum}");
     }
+    assert!(g.event_lists.contains(&EventOwner::Char(builder)));
+    assert!(g.events.iter().any(|e| e.kind == EventKind::SplDarkness { room: destination }));
+    assert!(g.events.iter().any(|e| e.kind == EventKind::TrigWait { go: mud_game::dg::GoId::Room(destination), iid: 123, event_id: 456 }));
+
+    // Updating an existing room preserves current light and does not shift again.
+    mud_game::olc::redit::do_oasis_redit(g, builder, b"2", 0, 0);
+    let source = g.real_room(2).unwrap();
+    g.rooms[source as usize].light = 9;
+    let owners = g.event_lists.clone();
+    let mut editing = g.olc.remove(&di).unwrap();
+    mud_game::olc::redit::redit_save_internally(g, di, &mut editing);
+    assert_eq!(g.rooms[source as usize].light, 9);
+    assert_eq!(g.event_lists, owners);
+    assert_eq!(g.olc[&other_di].room.as_ref().unwrap().dir_option[NORTH].as_ref().unwrap().to_room, destination);
     assert!(mud_game::olc::genwld::delete_room(g, new_room));
     let other_room = g.real_room(3).unwrap();
     assert_eq!(g.world.rooms[other_room as usize].dir_option[NORTHWEST].as_ref().unwrap().to_room, g.real_room(4).unwrap());
+    for vnum in room_vnums {
+        assert!(g.event_lists.contains(&EventOwner::Room(g.world.real_room(vnum).unwrap())), "lost event owner after deletion {vnum}");
+    }
 }
