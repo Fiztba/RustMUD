@@ -75,3 +75,37 @@ fn apply_selection_allows_adjacent_types_and_reediting_the_same_slot() {
         assert_eq!(olc.obj.as_ref().unwrap().affected[slot as usize].location, 1);
     }
 }
+
+#[test]
+fn every_apply_and_slot_obeys_duplicate_and_implementor_rules() {
+    let mut f = fixture("matrix"); let g = &mut f.game;
+    let builder = player(g, b"Builder", 12345); let di = descriptor(g, builder, ConState::Oedit);
+    for level in [LVL_BUILDER, LVL_IMPL] {
+        g.ch_mut(builder).level = level;
+        for location in 1..mud_data::flags::NUM_APPLIES as i32 {
+            for slot in 0..MAX_OBJ_AFFECT {
+                for other in 0..MAX_OBJ_AFFECT {
+                    let mut olc = OlcData::new(); oedit_setup_existing(g, &mut olc, 0);
+                    olc.obj.as_mut().unwrap().affected = Default::default();
+                    olc.obj.as_mut().unwrap().affected[other].location = location;
+                    olc.obj.as_mut().unwrap().affected[other].modifier = 7;
+                    olc.value = slot as i32; olc.mode = OEDIT_APPLY;
+                    let olc = oedit_parse(g, di, olc, (location + 1).to_string().as_bytes()).unwrap();
+                    let accepted = level == LVL_IMPL || slot == other;
+                    assert_eq!(olc.mode, if accepted { OEDIT_APPLYMOD } else { OEDIT_APPLY });
+                    assert_eq!(olc.obj.as_ref().unwrap().affected[other].modifier, 7);
+                    g.descriptors.get_mut(di).unwrap().output.clear();
+                }
+            }
+        }
+    }
+    for clear in [b"0".as_slice(), b"1".as_slice()] {
+        let mut olc = OlcData::new(); oedit_setup_existing(g, &mut olc, 0);
+        olc.value = 0; olc.mode = OEDIT_APPLY;
+        olc.obj.as_mut().unwrap().affected[0].location = 1;
+        olc.obj.as_mut().unwrap().affected[0].modifier = 7;
+        let olc = oedit_parse(g, di, olc, clear).unwrap();
+        assert_eq!(olc.obj.as_ref().unwrap().affected[0].location, 0);
+        assert_eq!(olc.obj.as_ref().unwrap().affected[0].modifier, 0);
+    }
+}
