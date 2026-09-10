@@ -84,4 +84,33 @@ fn copied_object_and_room_delete_the_edited_target() {
         assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Playing);
         assert!(!g.ch(ch).act.is_set(flags::PLR_WRITING));
     }
+
+    // Another builder inserts a prototype before the open editor's target.
+    // Missing board sentinels are a separate insertion defect covered by PR #34.
+    g.boards.rnum.fill(0);
+    mud_game::olc::genobj::add_object(g, &object, target).unwrap();
+    mud_game::olc::oedit::do_oasis_oedit(g, ch, b"3098", 0, 0);
+    let inserted = (1..target).find(|&v| g.world.real_object(v).is_none()).unwrap();
+    mud_game::olc::genobj::add_object(g, &object, inserted).unwrap();
+    for input in [b"x".as_slice(), b"n"] {
+        assert!(mud_game::olc::olc_parse(g, di, input));
+    }
+    assert!(g.world.real_object(target).is_some());
+    for input in [b"x".as_slice(), b"y"] {
+        assert!(mud_game::olc::olc_parse(g, di, input));
+    }
+    assert!(g.world.real_object(target).is_none());
+    assert!(g.world.real_object(inserted).is_some());
+
+    // If the target disappears while editing, confirmation cannot delete its neighbor.
+    mud_game::olc::genwld::add_room(g, &room, 0).unwrap();
+    mud_game::olc::redit::do_oasis_redit(g, ch, b"3098", 0, 0);
+    let rnum = g.world.real_room(target).unwrap();
+    assert!(mud_game::olc::genwld::delete_room(g, rnum));
+    let count = g.world.rooms.len();
+    for input in [b"x".as_slice(), b"y"] {
+        assert!(mud_game::olc::olc_parse(g, di, input));
+    }
+    assert_eq!(g.world.rooms.len(), count);
+    assert_eq!(g.descriptors.get(di).unwrap().state, ConState::Playing);
 }
