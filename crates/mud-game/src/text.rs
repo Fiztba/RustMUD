@@ -5,8 +5,6 @@ use std::path::Path;
 
 pub type BStr = Vec<u8>;
 
-const READ_SIZE: usize = 256;
-
 /// parse_at: '@' → '\t' unless doubled ('@@' → '@').
 pub fn parse_at(b: &mut Vec<u8>) {
     // parse_at: `@` becomes `\t` unless it is doubled, and a
@@ -16,34 +14,15 @@ pub fn parse_at(b: &mut Vec<u8>) {
     mud_net::editor::parse_at(&mut b[..]);
 }
 
-/// Read a text file in chunks of at most 255 bytes. Each non-empty chunk
-/// loses its final byte and gains a line ending, so a physical line longer
-/// than the chunk is broken mid-line, and a file whose last line has no
-/// newline loses its last byte.
+/// Read complete text lines, normalizing LF/CRLF to CRLF without dropping content.
 pub fn file_to_string(path: &Path) -> Option<BStr> {
     let data = std::fs::read(path).ok()?;
     let mut out: BStr = Vec::with_capacity(data.len() + data.len() / 32);
-    let mut i = 0usize;
-    while i < data.len() {
-        // Up to READ_SIZE-1 bytes, stopping after '\n'.
-        let mut chunk_end = i;
-        let limit = (i + READ_SIZE - 1).min(data.len());
-        while chunk_end < limit {
-            let c = data[chunk_end];
-            chunk_end += 1;
-            if c == b'\n' {
-                break;
-            }
-        }
-        let mut chunk = data[i..chunk_end].to_vec();
-        i = chunk_end;
-        if !chunk.is_empty() {
-            chunk.pop(); // tmp[len-1] = '\0'
-        }
-        out.extend_from_slice(&chunk);
+    for line in (OneLine { data: &data, pos: 0 }) {
+        out.extend_from_slice(line);
         out.extend_from_slice(b"\r\n");
         if out.len() + 1 > mud_data::types::MAX_STRING_LENGTH {
-            return Some(Vec::new()); // C zeroes the buffer and errors
+            return Some(Vec::new());
         }
     }
     Some(out)
@@ -164,17 +143,7 @@ fn one_word(input: &[u8], pos: &mut usize) -> BStr {
     out
 }
 
-/// Read at most 255 bytes, stopping after a newline, then drop the final
-/// byte UNCONDITIONALLY.
-///
-/// That last chop is the whole story. For an ordinary line it removes the
-/// `\n`. For a line of exactly 254 characters plus CRLF the buffer fills one
-/// byte short of the `\n`, so the `\r` is chopped instead and the orphaned
-/// `\n` comes back as an empty line of its own. Anything longer than that
-/// loses a character at every 255-byte boundary and continues mid-line.
-///
-/// help.hlp has lines at exactly that length, which is how the round trip
-/// through hedit caught this — the line has to survive as a blank line.
+/// Iterate complete physical lines, stripping only LF or CRLF terminators.
 struct OneLine<'a> {
     data: &'a [u8],
     pos: usize,
@@ -188,22 +157,19 @@ impl<'a> Iterator for OneLine<'a> {
             return None;
         }
         let start = self.pos;
-        let mut end = start;
-        while end < self.data.len() && end - start < 255 {
-            let b = self.data[end];
-            end += 1;
-            if b == b'\n' {
-                break;
-            }
+        if let Some(offset) = self.data[start..].iter().position(|&b| b == b'\n') {
+            let end = start + offset;
+            self.pos = end + 1;
+            let line = &self.data[start..end];
+            Some(line.strip_suffix(b"\r").unwrap_or(line))
+        } else {
+            self.pos = self.data.len();
+            Some(&self.data[start..])
         }
-        self.pos = end;
-        // buf[strlen(buf) - 1] = '\0'
-        Some(&self.data[start..end - 1])
     }
 }
 
-/// load_help over one .hlp file's bytes. Body lines keep their raw bytes
-/// (a CRLF source renders `\r\r\n`); only parsing strips the `\r`.
+/// Load help entries with complete lines and one CRLF per source line.
 pub fn load_help(data: &[u8], log: &mut Vec<String>) -> Vec<HelpEntry> {
     let mut entries = Vec::new();
     let mut lines = OneLine { data, pos: 0 };
@@ -711,40 +677,31 @@ mod get_one_line_tests {
     }
 
     #[test]
-    fn ordinary_line_loses_only_its_newline() {
-        assert_eq!(lines(b"abc\r\ndef\r\n"), vec![b"abc\r".to_vec(), b"def\r".to_vec()]);
-    }
-
-    /// 254 characters plus CRLF is 256 bytes: the read takes 255, stopping
-    /// one byte short of the '\n', and the chop removes the '\r'. The '\n'
-    /// is then a line by itself, which reads back as blank.
-    #[test]
-    fn two_hundred_fifty_four_plus_crlf_yields_a_blank_line() {
-        let mut d = vec![b'x'; 254];
-        d.extend_from_slice(b"\r\n");
-        assert_eq!(lines(&d), vec![vec![b'x'; 254], Vec::new()]);
-    }
-
-    /// Past 255 bytes a character is lost at the boundary.
-    #[test]
-    fn a_longer_line_loses_a_character_at_the_boundary() {
-        let mut d = vec![b'y'; 300];
-        d.extend_from_slice(b"\r\n");
-        let got = lines(&d);
-        assert_eq!(got[0].len(), 254);
-        assert_eq!(got[1], vec![b'y'; 300 - 255].into_iter().chain(*b"\r").collect::<Vec<u8>>());
+    fn ordinary_lines_normalize_their_terminators() {
+        assert_eq!(lines(b"abc\r\ndef\nlast"), vec![b"abc".to_vec(), b"def".to_vec(), b"last".to_vec()]);
     }
 
     #[test]
-    fn an_entry_keeps_the_blank_the_chop_creates() {
-        let mut d = vec![b'K'; 254];
-        d.extend_from_slice(b"\r\nbody\r\n#0\r\n$~\r\n");
-        let mut log = Vec::new();
-        let e = load_help(&d, &mut log);
+    fn two_hundred_fifty_four_plus_crlf_is_one_line() {
+        let mut d = vec![b'x'; 254]; d.extend_from_slice(b"\r\n");
+        assert_eq!(lines(&d), vec![vec![b'x'; 254]]);
+    }
+
+    #[test]
+    fn a_longer_line_preserves_every_character() {
+        let mut d = vec![b'y'; 300]; d.extend_from_slice(b"\r\n");
+        assert_eq!(lines(&d), vec![vec![b'y'; 300]]);
+    }
+
+    #[test]
+    fn a_long_keyword_does_not_create_an_extra_blank() {
+        let mut d = vec![b'K'; 254]; d.extend_from_slice(b"\r\nbody\r\n#0\r\n$~\r\n");
+        let mut log = Vec::new(); let e = load_help(&d, &mut log);
         assert_eq!(e.len(), 1);
-        let text = String::from_utf8_lossy(e[0].entry.as_ref()).into_owned();
-        assert!(text.contains("\r\n\r\nbody"), "{:?}", text);
+        let mut expected = vec![b'K'; 254]; expected.extend_from_slice(b"\r\nbody\r\n");
+        assert_eq!(e[0].entry.as_ref(), &expected);
     }
+
 }
 
 #[cfg(test)]
