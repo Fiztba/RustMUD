@@ -138,7 +138,7 @@ fn keeper_say(g: &mut Game, keeper: CharId, msg: &[u8]) {
 /// Format one of the seven shop message templates: %s = name, %d = amount,
 /// %% = literal %. A missing (validation-dropped) template logs and yields
 /// an empty message rather than formatting a missing string (F2 class).
-fn shop_msg(g: &mut Game, shop_idx: usize, which: &str, name: &[u8], amount: i32) -> Vec<u8> {
+fn shop_msg(g: &mut Game, shop_idx: usize, which: &str, name: &[u8], amount: i64) -> Vec<u8> {
     let template = {
         let s = &g.world.shops[shop_idx];
         match which {
@@ -737,7 +737,7 @@ fn shopping_buy(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_idx
     }
 
     let mut bought = 0;
-    let mut goldamt = 0;
+    let mut goldamt = 0i64;
     let mut last_obj: Option<ObjId> = None;
     let mut cur: Option<ObjId> = Some(obj);
     loop {
@@ -767,13 +767,13 @@ fn shopping_buy(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_idx
 
         if quest_item {
             let cost = g.obj(bought_obj).cost;
-            goldamt += cost;
+            goldamt += i64::from(cost);
             if !is_god {
                 g.ch_mut(chid).ps_mut().questpoints -= cost;
             }
         } else {
             let charged = buy_price(g, bought_obj, shop_idx, keeper, chid);
-            goldamt += charged;
+            goldamt += i64::from(charged);
             if !is_god {
                 decrease_gold(g, chid, charged);
             }
@@ -821,7 +821,7 @@ fn shopping_buy(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_idx
     // purchased object, so there is no empty case to guard here.
     let (pay, quest_tell) = (!quest_item, quest_item);
     if !is_god && pay {
-        increase_gold(g, keeper, goldamt);
+        increase_gold(g, keeper, goldamt.clamp(0, i64::from(MAX_GOLD)) as i32);
         if g.world.shops[shop_idx].bitvector & WILL_BANK_MONEY != 0
             && g.ch(keeper).points.gold > MAX_OUTSIDE_BANK
         {
@@ -934,7 +934,7 @@ fn shopping_sell(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_id
     }
 
     let mut sold = 0;
-    let mut goldamt = 0;
+    let mut goldamt = 0i64;
     let mut cur = Some(first);
     while let Some(o) = cur {
         if !(unlimited_cash
@@ -944,7 +944,10 @@ fn shopping_sell(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_id
             break;
         }
         let charged = sell_price(g, o, shop_idx, keeper, chid);
-        goldamt += charged;
+        if i64::from(g.ch(chid).points.gold) + goldamt + i64::from(charged) > i64::from(MAX_GOLD) {
+            break;
+        }
+        goldamt += i64::from(charged);
         if !unlimited_cash {
             let cash = charged.min(g.ch(keeper).points.gold);
             decrease_gold(g, keeper, cash);
@@ -960,6 +963,10 @@ fn shopping_sell(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_id
         let mut buf = chname.clone();
         if cur.is_none() {
             buf.extend_from_slice(format!(" You only have {} of those.", sold).as_bytes());
+        } else if i64::from(g.ch(chid).points.gold) + goldamt
+            + i64::from(sell_price(g, cur.unwrap(), shop_idx, keeper, chid)) > i64::from(MAX_GOLD)
+        {
+            buf.extend_from_slice(b" You must spend or bank some gold before selling more.");
         } else if keeper_funds(g, keeper, shop_idx)
             < i64::from(sell_price(g, cur.unwrap(), shop_idx, keeper, chid))
         {
@@ -969,7 +976,7 @@ fn shopping_sell(g: &mut Game, arg: &[u8], chid: CharId, keeper: CharId, shop_id
         }
         keeper_tell_raw(g, keeper, &buf);
     }
-    increase_gold(g, chid, goldamt);
+    increase_gold(g, chid, goldamt.clamp(0, i64::from(MAX_GOLD)) as i32);
 
     let tempstr = times_message(g, None, &name, sold);
     let mut tempbuf = b"$n sells ".to_vec();
