@@ -303,8 +303,9 @@ pub fn remove_world_index(g: &mut Game, znum: i32, type_: &str) -> bool {
 /// zone that targets this room. `cmd_room` is deliberately *not* reset
 /// between iterations, so a command type it does not recognise
 /// (anything but M/O/T/V/D/R) is judged against the previous command's
-/// room — and removed with it.
-pub fn remove_room_zone_commands(g: &mut Game, zone: usize, room_num: RoomRnum) {
+/// room — and removed with it. Return the first removed position (or the end).
+pub fn remove_room_zone_commands(g: &mut Game, zone: usize, room_num: RoomRnum) -> usize {
+    let mut first_removed = None;
     let mut subcmd = 0usize;
     let mut cmd_room: i32 = -2;
     while subcmd < g.world.zones[zone].cmds.len() {
@@ -315,11 +316,13 @@ pub fn remove_room_zone_commands(g: &mut Game, zone: usize, room_num: RoomRnum) 
             _ => {}
         }
         if cmd_room == room_num as i32 {
+            first_removed.get_or_insert(subcmd);
             g.world.zones[zone].cmds.remove(subcmd);
         } else {
             subcmd += 1;
         }
     }
+    first_removed.unwrap_or(g.world.zones[zone].cmds.len())
 }
 
 /// count_commands. Our list has no 'S' terminator, so
