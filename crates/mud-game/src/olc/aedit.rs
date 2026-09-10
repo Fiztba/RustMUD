@@ -784,9 +784,9 @@ pub fn aedit_parse(
             }
             let a = olc.action.as_mut().unwrap();
             if olc.mode == AEDIT_ACTION_NAME {
-                a.command = arg.to_vec();
+                a.command = arg.to_ascii_lowercase();
             } else {
-                a.sort_as = arg.to_vec();
+                a.sort_as = arg.to_ascii_lowercase();
             }
         }
 
