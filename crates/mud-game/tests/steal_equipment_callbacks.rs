@@ -71,9 +71,8 @@ fn item(g: &mut Game, name: &[u8]) -> mud_data::ids::ObjId {
     obj.wear_flags.set(mud_data::flags::ITEM_WEAR_TAKE);
     g.objs.insert(obj)
 }
-#[test]
-fn theft_does_not_take_replacement_equipment_after_an_act_trigger() {
-    let mut f = fixture("replacement"); let g = &mut f.game;
+fn theft_case(scenario: &str) {
+    let mut f = fixture(scenario); let g = &mut f.game;
     let thief = player(g, b"Thief", 12345);
     let victim = player(g, b"Victim", 12346);
     for ch in [thief, victim] { char_to_room(g, ch, 0); g.character_list.push_back(ch); }
@@ -91,10 +90,33 @@ fn theft_does_not_take_replacement_equipment_after_an_act_trigger() {
     }
     equip_char(g, victim, original, WEAR_BODY);
     obj_to_char(g, replacement, victim);
-    listener(g, b"steals", &[b"mpurge %object%", b"eval awake %victim.pos(standing)%", b"mforce %victim% wear replacement body"]);
+    match scenario {
+        "replacement" => { listener(g, b"steals", &[b"mpurge %object%", b"eval awake %victim.pos(standing)%", b"mforce %victim% wear replacement body"]); }
+        "purge" => { listener(g, b"steals", &[b"mpurge %object%"]); }
+        _ => {}
+    }
     mud_game::act::other::do_steal(g, thief, b"original Victim", 0, 0);
+    if scenario == "normal" {
+        assert_eq!(g.obj(original).carried_by, Some(thief));
+        assert_eq!(g.ch(thief).carry_items, 1);
+        assert_eq!(g.ch(victim).equipment[WEAR_BODY], None);
+        assert_eq!(g.obj(replacement).carried_by, Some(victim));
+        return;
+    }
     assert!(g.try_obj(original).is_none());
+    if scenario == "purge" {
+        assert_eq!(g.ch(victim).equipment[WEAR_BODY], None);
+        assert_eq!(g.ch(thief).carry_items, 0);
+        return;
+    }
     assert_eq!(g.ch(victim).equipment[WEAR_BODY], Some(replacement));
     assert_eq!(g.obj(replacement).worn_by, Some(victim));
     assert_eq!(g.ch(thief).carry_items, 0);
 }
+
+#[test]
+fn replacement_is_not_stolen() { theft_case("replacement"); }
+#[test]
+fn deleted_target_stops_theft() { theft_case("purge"); }
+#[test]
+fn normal_equipment_theft_succeeds() { theft_case("normal"); }
