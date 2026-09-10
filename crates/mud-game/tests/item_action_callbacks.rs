@@ -78,14 +78,14 @@ fn action_case(action: &str) {
     let actor = player(g, b"Actor", 12345); g.ch_mut(actor).level = LVL_IMPL;
     char_to_room(g, actor, 0); g.rooms[0].light = 1;
     descriptor(g, actor, ConState::Playing);
-    let verb = match action { "drink" => b"drinks".as_slice(), "eat" => b"eats", "pour" => b"empties",
+    let verb = match action { "drink" => b"drinks".as_slice(), "sip" => b"sips", "eat" => b"eats", "taste" => b"tastes", "pour" => b"empties",
         "fill" | "fill-source" => b"fills", "wear" => b"wears", _ => b"sacrifices" };
     listener(g, verb, &[if action == "fill-source" { b"mpurge fountain" } else { b"mpurge %object%" }]);
     let oid = item(g, b"item"); obj_to_char(g, oid, actor);
     let mut source = None;
     match action {
-        "drink" | "pour" => { g.obj_mut(oid).type_flag = flags::ITEM_DRINKCON; g.obj_mut(oid).values = [10, 10, 0, 0]; }
-        "eat" => { g.obj_mut(oid).type_flag = flags::ITEM_FOOD; g.obj_mut(oid).values[0] = 5; }
+        "drink" | "sip" | "pour" => { g.obj_mut(oid).type_flag = flags::ITEM_DRINKCON; g.obj_mut(oid).values = [10, 10, 0, 0]; }
+        "eat" | "taste" => { g.obj_mut(oid).type_flag = flags::ITEM_FOOD; g.obj_mut(oid).values[0] = 5; }
         "fill" | "fill-source" => {
             g.obj_mut(oid).type_flag = flags::ITEM_DRINKCON; g.obj_mut(oid).values = [10, 0, 0, 0];
             let fountain = item(g, b"fountain"); g.obj_mut(fountain).type_flag = flags::ITEM_FOUNTAIN;
@@ -96,6 +96,8 @@ fn action_case(action: &str) {
     }
     match action {
         "drink" => mud_game::act::item::do_drink(g, actor, b"item", 0, SCMD_DRINK),
+        "sip" => mud_game::act::item::do_drink(g, actor, b"item", 0, SCMD_SIP),
+        "taste" => mud_game::act::item::do_eat(g, actor, b"item", 0, SCMD_TASTE),
         "eat" => mud_game::act::item::do_eat(g, actor, b"item", 0, SCMD_EAT),
         "pour" => mud_game::act::item::do_pour(g, actor, b"item out", 0, SCMD_POUR),
         "fill" | "fill-source" => mud_game::act::item::do_pour(g, actor, b"item fountain", 0, SCMD_FILL),
@@ -115,3 +117,66 @@ fn action_case(action: &str) {
 #[test] fn fill_survives_source_extraction() { action_case("fill-source"); }
 #[test] fn wear_survives_listener_extraction() { action_case("wear"); }
 #[test] fn sacrifice_survives_listener_extraction() { action_case("sac"); }
+
+
+#[test] fn sip_survives_listener_extraction() { action_case("sip"); }
+#[test] fn taste_survives_listener_extraction() { action_case("taste"); }
+fn poisoned_case(drink: bool) {
+    let mut f = fixture(if drink { "poison-drink" } else { "poison-food" }); let g = &mut f.game;
+    let actor = player(g, b"Actor", 12345); char_to_room(g, actor, 0); g.rooms[0].light = 1;
+    descriptor(g, actor, ConState::Playing);
+    let oid = item(g, b"item");
+    g.obj_mut(oid).type_flag = if drink { flags::ITEM_DRINKCON } else { flags::ITEM_FOOD };
+    g.obj_mut(oid).values = [5, 5, 0, 1]; obj_to_char(g, oid, actor);
+    let uid = dg::obj_script_id(g, oid);
+    let purge = format!("mpurge }}{uid}");
+    listener(g, if drink { b"chokes" } else { b"coughs" }, &[purge.as_bytes()]);
+    if drink { mud_game::act::item::do_drink(g, actor, b"item", 0, SCMD_DRINK); }
+    else { mud_game::act::item::do_eat(g, actor, b"item", 0, SCMD_EAT); }
+    assert!(g.try_obj(oid).is_none());
+    assert!(g.ch(actor).affected_by.is_set(flags::AFF_POISON));
+}
+#[test] fn poisoned_drink_survives_the_second_callback() { poisoned_case(true); }
+#[test] fn poisoned_food_survives_the_second_callback() { poisoned_case(false); }
+
+#[test]
+fn callbacks_that_drop_items_cancel_consumption_and_equipping() {
+    let mut f = fixture("relocation"); let g = &mut f.game;
+    let actor = player(g, b"Actor", 12345); char_to_room(g, actor, 0); g.rooms[0].light = 1;
+    descriptor(g, actor, ConState::Playing);
+    for action in ["drinks", "eats", "wears"] {
+        listener(g, action.as_bytes(), &[b"mforce %actor% drop item"]);
+        let oid = item(g, b"item");
+        g.obj_mut(oid).type_flag = match action { "drinks" => flags::ITEM_DRINKCON, "eats" => flags::ITEM_FOOD, _ => flags::ITEM_ARMOR };
+        g.obj_mut(oid).values = [5, 5, 0, 0];
+        g.obj_mut(oid).wear_flags.set(flags::ITEM_WEAR_BODY);
+        obj_to_char(g, oid, actor);
+        match action {
+            "drinks" => mud_game::act::item::do_drink(g, actor, b"item", 0, SCMD_DRINK),
+            "eats" => mud_game::act::item::do_eat(g, actor, b"item", 0, SCMD_EAT),
+            _ => mud_game::act::item::do_wear(g, actor, b"item body", 0, 0),
+        }
+        assert_eq!(g.obj(oid).in_room, 0, "{action}");
+        assert_eq!(g.obj(oid).values, [5, 5, 0, 0]);
+        assert_eq!(g.ch(actor).carry_items, 0);
+        assert!(g.ch(actor).equipment.iter().all(Option::is_none));
+    }
+}
+
+#[test]
+fn a_slot_filled_by_the_wear_announcement_does_not_orphan_the_original() {
+    let mut f = fixture("occupied-slot"); let g = &mut f.game;
+    let actor = player(g, b"Actor", 12345); char_to_room(g, actor, 0); g.rooms[0].light = 1;
+    descriptor(g, actor, ConState::Playing);
+    listener(g, b"wears", &[b"mforce %actor% wear other body"]);
+    let oid = item(g, b"item"); let other = item(g, b"other");
+    for object in [oid, other] {
+        g.obj_mut(object).type_flag = flags::ITEM_ARMOR;
+        g.obj_mut(object).wear_flags.set(flags::ITEM_WEAR_BODY);
+        obj_to_char(g, object, actor);
+    }
+    mud_game::act::item::do_wear(g, actor, b"item body", 0, 0);
+    assert_eq!(g.ch(actor).equipment[WEAR_BODY], Some(other));
+    assert_eq!(g.obj(oid).carried_by, Some(actor));
+    assert!(g.ch(actor).carrying.contains(&oid));
+}

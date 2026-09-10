@@ -1524,7 +1524,8 @@ fn perform_wear(g: &mut Game, chid: CharId, oid: ObjId, mut where_: usize) {
         return;
     }
     wear_message(g, chid, oid, where_);
-    if !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid)) { return; }
+    if !g.try_obj(oid).is_some_and(|o| o.carried_by == Some(chid))
+        || g.ch(chid).equipment[where_].is_some() { return; }
     obj_from_char(g, oid);
     handler::equip_char(g, chid, oid, where_);
 }
