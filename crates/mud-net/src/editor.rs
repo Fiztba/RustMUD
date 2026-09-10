@@ -485,10 +485,6 @@ const HELP_TEXT: &[u8] = b"Editor command formats: /<letter>\r\n\r\n\
 A line number or range narrows /d, /f, /fi, /l and /n to those lines:\r\n\
 \x20             usage: /fi 5  (line 5)   /fi 5-9  (lines 5 through 9)\r\n";
 
-/// READ_SIZE — the `char line[]` format_script builds each
-/// output line in.
-const READ_SIZE: usize = 256;
-
 /// Case-insensitive prefix test. A line shorter than the keyword can never
 /// match.
 fn strn_starts(t: &[u8], word: &[u8]) -> bool {
@@ -504,9 +500,7 @@ fn strn_starts(t: &[u8], word: &[u8]) -> bool {
 /// * keyword matching is case-insensitive, so `IF `, `End` and `BREAK` all
 ///   count;
 /// * runs of line endings collapse, so blank lines vanish from the result;
-/// * the length check uses the line's *untruncated* length, and counts two
-///   bytes per indent level whether or not the 256-byte line buffer had
-///   room for them.
+/// * the complete output must fit before the original is replaced.
 fn format_script(eb: &mut EditBuf, msgs: &mut Vec<Vec<u8>>) -> bool {
     let Some(src) = eb.buf.clone() else { return false };
     if src.is_empty() {
@@ -592,29 +586,16 @@ fn format_script(eb: &mut EditBuf, msgs: &mut Vec<Vec<u8>>) -> bool {
         }
 
         let levels = indent.max(0) as usize;
-        let nlen = levels * 2; // counted whether or not the write truncates
-        let mut line: Vec<u8> = Vec::new();
-        for _ in 0..levels {
-            if line.len() + 2 <= READ_SIZE - 1 {
-                line.extend_from_slice(b"  ");
-            }
-        }
-        // Past 128 indent levels the text would run off the 256-byte
-        // buffer. Clamp to the buffer instead.
-        let off = nlen.min(line.len());
-        line.truncate(off);
-        let mut tail = t.to_vec();
-        tail.extend_from_slice(b"\r\n");
-        let llen = tail.len(); // the untruncated length
-        let room = READ_SIZE.saturating_sub(off).saturating_sub(1);
-        line.extend_from_slice(&tail[..llen.min(room)]);
-
-        if llen + nlen + len > eb.max_str - 1 {
+        let nlen = levels * 2;
+        let llen = t.len() + 2;
+        if llen + nlen + len >= eb.max_str {
             msgs.push(b"String too long, formatting aborted\r\n".to_vec());
             return false;
         }
         len += nlen + llen;
-        nsc.extend_from_slice(&line);
+        nsc.resize(nsc.len() + nlen, b' ');
+        nsc.extend_from_slice(t);
+        nsc.extend_from_slice(b"\r\n");
 
         if indent_next {
             indent += 1;
@@ -709,7 +690,10 @@ fn parse_edit_action(
             };
             let line_low = line_low.max(1); // in case line_low is negative or zero
 
-            format_text(eb, flags, line_low, line_high, msgs);
+            if format_text(eb, flags, line_low, line_high, msgs) == 0 {
+                msgs.push(b"Text not formatted.\r\n".to_vec());
+                return;
+            }
             let msg: &[u8] = if indent {
                 b"Text formatted with indent.\r\n"
             } else {
@@ -1121,10 +1105,8 @@ fn parse_edit_action(
 // replace_str
 // ---------------------------------------------------------------------------
 
-/// Returns the occurrence count, 0 for "not found" (including the mid-loop
-/// overflow abort, which also reports 0 after truncating the string at the
-/// failing match — see below), or -1 when the up-front size check
-/// fails.
+/// Returns the occurrence count, zero when absent, or -1 if the complete
+/// replacement would exceed the buffer. Failure leaves the source intact.
 fn replace_str(
     string: &mut Vec<u8>,
     pattern: &[u8],
@@ -1132,61 +1114,35 @@ fn replace_str(
     rep_all: bool,
     max_size: u32,
 ) -> i32 {
-    // (strlen(*string) - strlen(pattern)) + strlen(replacement) > max_size,
-    // in size_t arithmetic (wraps for pattern longer than the string).
-    let check = (string.len() as u64)
-        .wrapping_sub(pattern.len() as u64)
-        .wrapping_add(replacement.len() as u64);
-    if check > max_size as u64 {
-        return -1;
-    }
-
-    let cap = max_size as usize;
-    let mut replace_buffer: Vec<u8> = Vec::new();
-    let mut i: i32 = 0;
-
-    if rep_all {
-        let mut jetsam = 0usize;
-        let mut flow = 0usize;
-        while let Some(rel) = find_sub(&string[flow..], pattern) {
-            let m = flow + rel;
-            i += 1;
-            // temp = *flow; *flow = '\0';
-            let seg_len = m - jetsam;
-            if replace_buffer.len() + seg_len + replacement.len() > cap {
-                i = -1;
-                // Break without restoring temp: the source string is left
-                // truncated at this match.
-                string.truncate(m);
-                break;
-            }
-            let seg: Vec<u8> = string[jetsam..m].to_vec();
-            append_within(&mut replace_buffer, &seg, cap);
-            append_within(&mut replace_buffer, replacement, cap);
-            // *flow = temp; flow += strlen(pattern); jetsam = flow;
-            flow = m + pattern.len();
-            jetsam = flow;
-            if pattern.is_empty() {
-                break; // an empty pattern would never advance; tokens are non-empty
-            }
-        }
-        let tail: Vec<u8> = string.get(jetsam..).unwrap_or(&[]).to_vec();
-        append_within(&mut replace_buffer, &tail, cap);
-    } else if let Some(m) = find_sub(string, pattern) {
-        i += 1;
-        // Copy everything before the match, clamped to the buffer.
-        let n = m.min(cap.saturating_sub(1));
-        replace_buffer.extend_from_slice(&string[..n]);
-        append_within(&mut replace_buffer, replacement, cap);
-        let rest: Vec<u8> = string[m + pattern.len()..].to_vec();
-        append_within(&mut replace_buffer, &rest, cap);
-    }
-
-    if i <= 0 {
+    if pattern.is_empty() {
         return 0;
     }
-    *string = replace_buffer;
-    i
+    let mut result = Vec::new();
+    let mut cursor = 0;
+    let mut count = 0;
+    while let Some(relative) = find_sub(&string[cursor..], pattern) {
+        let start = cursor + relative;
+        let next_len = result.len() + relative + replacement.len();
+        if next_len >= max_size as usize {
+            return -1;
+        }
+        result.extend_from_slice(&string[cursor..start]);
+        result.extend_from_slice(replacement);
+        cursor = start + pattern.len();
+        count += 1;
+        if !rep_all {
+            break;
+        }
+    }
+    if count == 0 {
+        return 0;
+    }
+    if result.len() + string.len() - cursor >= max_size as usize {
+        return -1;
+    }
+    result.extend_from_slice(&string[cursor..]);
+    *string = result;
+    count
 }
 
 // ---------------------------------------------------------------------------
@@ -1279,7 +1235,7 @@ fn format_text(eb: &mut EditBuf, mode: i32, low: i32, high: i32, msgs: &mut Vec<
         };
         let mut piece = tok.to_vec();
         piece.push(b'\n');
-        append_within(&mut formatted, &piece, MAX_STRING_LENGTH);
+        formatted.extend_from_slice(&piece);
         match find_nl(&orig, fpos) {
             Some(q) => fpos = q + 1,
             None => {
@@ -1293,7 +1249,7 @@ fn format_text(eb: &mut EditBuf, mode: i32, low: i32, high: i32, msgs: &mut Vec<
     }
 
     if mode & FORMAT_INDENT != 0 {
-        append_within(&mut formatted, b"   ", MAX_STRING_LENGTH);
+        formatted.extend_from_slice(b"   ");
         line_chars = 3;
     } else {
         line_chars = 0;
@@ -1377,24 +1333,24 @@ fn format_text(eb: &mut EditBuf, mode: i32, low: i32, high: i32, msgs: &mut Vec<
             // value wraps huge and triggers the wrap.
             let width = line_chars as i64 + word.len() as i64 + 1 - color_chars as i64;
             if width as u64 > PAGE_WIDTH as u64 {
-                append_within(&mut formatted, b"\r\n", MAX_STRING_LENGTH);
+                formatted.extend_from_slice(b"\r\n");
                 line_chars = 0;
                 color_chars = count_color_chars(word);
             }
 
             if !cap_next {
                 if line_chars > 0 {
-                    append_within(&mut formatted, b" ", MAX_STRING_LENGTH);
+                    formatted.extend_from_slice(b" ");
                     line_chars += 1;
                 }
                 line_chars += word.len() as i32;
-                append_within(&mut formatted, word, MAX_STRING_LENGTH);
+                formatted.extend_from_slice(word);
             } else {
                 cap_next = false;
                 let mut capped = word.to_vec();
                 capitalise(&mut capped);
                 line_chars += capped.len() as i32;
-                append_within(&mut formatted, &capped, MAX_STRING_LENGTH);
+                formatted.extend_from_slice(&capped);
             }
             // *flow = temp
         }
@@ -1402,32 +1358,33 @@ fn format_text(eb: &mut EditBuf, mode: i32, low: i32, high: i32, msgs: &mut Vec<
         if cap_next_next && ch(&orig, fpos) != 0 {
             // All-int arithmetic here (no size_t promotion).
             if line_chars + 3 - color_chars > PAGE_WIDTH {
-                append_within(&mut formatted, b"\r\n", MAX_STRING_LENGTH);
+                formatted.extend_from_slice(b"\r\n");
                 line_chars = 0;
                 color_chars = count_color_chars(&orig[word_range.0..word_range.1]);
             } else if ch(&orig, fpos) == b'"' || ch(&orig, fpos) == b'\'' {
                 let quote = [ch(&orig, fpos), b' ', b' '];
-                append_within(&mut formatted, &quote, MAX_STRING_LENGTH);
+                formatted.extend_from_slice(&quote);
                 fpos += 1;
                 line_chars += 1;
             } else {
-                append_within(&mut formatted, b"  ", MAX_STRING_LENGTH);
+                formatted.extend_from_slice(b"  ");
                 line_chars += 2;
             }
         }
     }
 
     if ch(&orig, fpos) != 0 {
-        append_within(&mut formatted, b"\r\n", MAX_STRING_LENGTH);
+        formatted.extend_from_slice(b"\r\n");
     }
-    append_within(&mut formatted, &orig[fpos.min(len)..], MAX_STRING_LENGTH);
+    formatted.extend_from_slice(&orig[fpos.min(len)..]);
     if ch(&orig, fpos) == 0 {
-        append_within(&mut formatted, b"\r\n", MAX_STRING_LENGTH);
+        formatted.extend_from_slice(b"\r\n");
     }
 
-    // int len = MIN(maxlen, strlen(formatted) + 1); copy len - 1 chars.
-    let out_len = maxlen.min(formatted.len() + 1);
-    formatted.truncate(out_len.saturating_sub(1));
+    if formatted.len() >= maxlen {
+        msgs.push(b"String too long, formatting aborted\r\n".to_vec());
+        return 0;
+    }
     eb.buf = Some(formatted);
     1
 }
@@ -1793,14 +1750,45 @@ mod tests {
     }
 
     #[test]
-    fn replace_all_overflow_truncates_and_reports_not_found() {
-        // A quirk: the mid-loop overflow abort in replace_str breaks with
-        // the scratch '\0' still written, truncating the buffer at the match,
-        // and returns 0 — so the player sees "not found".
+    fn replace_all_overflow_preserves_original() {
         let mut eb = EditBuf { buf: Some(b"aaaa\r\n".to_vec()), max_str: 12 };
         let (_, m, _) = add(&mut eb, b"/ra 'a' 'bbbb'");
-        assert_eq!(m, vec![b"String 'a' not found.\r\n".to_vec()]);
-        assert_eq!(buf(&eb), b"aaa");
+        assert!(m[0].windows(8).any(|w| w == b"overflow"));
+        assert_eq!(buf(&eb), b"aaaa\r\n");
+    }
+
+    #[test]
+    fn replace_includes_unchanged_tail_in_limit() {
+        for original in [&b"aa tail\r\n"[..], &b"aaaa\r\n"[..]] {
+            let mut eb = EditBuf { buf: Some(original.to_vec()), max_str: 12 };
+            add(&mut eb, b"/ra 'a' 'bbbb'");
+            assert_eq!(buf(&eb), original);
+        }
+        let mut eb = EditBuf { buf: Some(b"aaaa\r\n".to_vec()), max_str: 19 };
+        add(&mut eb, b"/ra 'a' 'bbbb'");
+        assert_eq!(buf(&eb), b"bbbbbbbbbbbbbbbb\r\n");
+    }
+
+    #[test]
+    fn script_format_preserves_long_commands_and_newlines() {
+        let command = format!("say {}", "x".repeat(400));
+        let original = format!("if 1\r\n{command}\r\nend\r\nsay done\r\n");
+        let mut eb = EditBuf { buf: Some(original.into_bytes()), max_str: 2048 };
+        editor_add_line(&mut eb, b"/f", true, true);
+        assert_eq!(buf(&eb), format!("if 1\r\n  {command}\r\nend\r\nsay done\r\n").as_bytes());
+    }
+
+    #[test]
+    fn formatting_overflow_preserves_original() {
+        for max_str in [0, 5, 10, MAX_STRING_LENGTH] {
+            let original = if max_str == MAX_STRING_LENGTH {
+                b"a. ".repeat(MAX_STRING_LENGTH / 3 - 1)
+            } else { b"hello\r\n".to_vec() };
+            let mut eb = EditBuf { buf: Some(original.clone()), max_str };
+            let (_, messages, _) = add(&mut eb, b"/fi");
+            assert_eq!(buf(&eb), original);
+            assert!(!messages.iter().any(|m| m.starts_with(b"Text formatted")));
+        }
     }
 
     // -- /t ------------------------------------------------------------------
@@ -1920,16 +1908,14 @@ mod tests {
     }
 
     #[test]
-    fn format_too_few_lines_still_reports_formatted() {
-        // format_text's return value is ignored by PARSE_FORMAT: both
-        // messages are sent.
+    fn format_too_few_lines_reports_failure() {
         let mut eb = three_lines();
         let (_, m, _) = add(&mut eb, b"/f 99");
         assert_eq!(
             m,
             vec![
                 b"There aren't that many lines!\r\n".to_vec(),
-                b"Text formatted without indent.\r\n".to_vec(),
+                b"Text not formatted.\r\n".to_vec(),
             ]
         );
         assert_eq!(buf(&eb), b"one\r\ntwo\r\nthree\r\n");
