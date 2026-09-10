@@ -56,27 +56,45 @@ fn prepare_proto(g: &mut Game, rnum: usize, weight: i32) {
 fn transformation_updates_counts_and_keeps_contents_weight() {
     let mut f = fixture("transform"); let g = &mut f.game;
     let ch = player(g, b"Carrier", 12345);
+    for nested in [false, true] { for old_capacity in [0, 100] { for new_capacity in [0, 100] {
     prepare_proto(g, 0, 2); prepare_proto(g, 1, 5);
+    g.world.obj_protos[0].values[0] = old_capacity; g.world.obj_protos[1].values[0] = new_capacity;
     let item = mud_game::db::read_object(g, 0).unwrap();
     let mut child = mud_game::obj::create_obj(); child.weight = 7; let child = g.objs.insert(child);
-    mud_game::handler::obj_to_obj(g, child, item); mud_game::handler::obj_to_char(g, item, ch);
+    mud_game::handler::obj_to_obj(g, child, item);
+    let outer = if nested {
+        let mut outer = mud_game::obj::create_obj(); outer.weight = 3; outer.values[0] = 100;
+        let outer = g.objs.insert(outer); mud_game::handler::obj_to_char(g, outer, ch);
+        mud_game::handler::obj_to_obj(g, item, outer); Some(outer)
+    } else { mud_game::handler::obj_to_char(g, item, ch); None };
     let old_count = g.obj_counts[0]; let new_count = g.obj_counts[1];
     let command = format!("otransform {}", g.world.obj_protos[1].vnum);
     mud_game::dg::objcmd::obj_command_interpreter(g, item, command.as_bytes());
     assert_eq!(g.obj(item).item_number, 1);
-    assert_eq!(g.obj(item).weight, 12);
-    assert_eq!(g.ch(ch).carry_weight, 12);
+    let expected_weight = if new_capacity > 0 { 12 } else { 5 };
+    assert_eq!(g.obj(item).weight, expected_weight);
+    assert_eq!(g.ch(ch).carry_weight, expected_weight + if nested { 3 } else { 0 });
     assert_eq!(g.obj(item).contains, vec![child]); assert_eq!(g.obj(child).in_obj, Some(item));
     assert_eq!(g.obj_counts[0], old_count - 1); assert_eq!(g.obj_counts[1], new_count + 1);
+    mud_game::dg::objcmd::obj_command_interpreter(g, item, command.as_bytes());
+    assert_eq!(g.obj_counts[0], old_count - 1); assert_eq!(g.obj_counts[1], new_count + 1);
+    assert_eq!(g.obj(item).weight, expected_weight);
+    let counts = g.obj_counts.clone();
+    for invalid in ["-1", "65535", "65536", "4294967296", "1junk"] {
+        mud_game::dg::objcmd::obj_command_interpreter(g, item, format!("otransform {invalid}").as_bytes());
+        assert_eq!(g.obj(item).item_number, 1); assert_eq!(g.obj_counts, counts);
+    }
     mud_game::handler::extract_obj(g, item);
+    if let Some(outer) = outer { mud_game::handler::extract_obj(g, outer); }
     assert_eq!(g.obj_counts[1], new_count); assert_eq!(g.ch(ch).carry_weight, 0);
+    } } }
 }
 
 #[test]
 fn editing_a_worn_object_replaces_its_effects() {
     use mud_data::flags;
     let mut f = fixture("worn"); let g = &mut f.game;
-    let ch = player(g, b"Wearer", 12345); mud_game::handler::char_to_room(g, ch, 0);
+    let ch = player(g, b"Wearer", 12345); descriptor(g, ch, ConState::Playing); mud_game::handler::char_to_room(g, ch, 0);
     prepare_proto(g, 0, 2);
     g.world.obj_protos[0].affected[0] = mud_world::model::ObjAffect { location: flags::APPLY_HIT, modifier: 10 };
     let item = mud_game::db::read_object(g, 0).unwrap(); g.ch_mut(ch).points.max_hit = 100;
@@ -87,6 +105,16 @@ fn editing_a_worn_object_replaces_its_effects() {
     assert_eq!(g.ch(ch).points.max_hit, 130);
     assert_eq!(g.obj(item).worn_by, Some(ch));
     mud_game::handler::unequip_char(g, ch, WEAR_HOLD);
+    assert_eq!(g.ch(ch).points.max_hit, 100);
+    assert!(mud_game::handler::equip_char(g, ch, item, WEAR_LIGHT));
+    let light = g.rooms[0].light;
+    proto.type_flag = flags::ITEM_LIGHT; proto.values[2] = 1;
+    mud_game::olc::genobj::add_object(g, &proto, proto.vnum);
+    assert_eq!(g.rooms[0].light, light + 1);
+    proto.values[2] = 0;
+    mud_game::olc::genobj::add_object(g, &proto, proto.vnum);
+    assert_eq!(g.rooms[0].light, light);
+    mud_game::handler::unequip_char(g, ch, WEAR_LIGHT);
     assert_eq!(g.ch(ch).points.max_hit, 100);
 }
 
@@ -101,7 +129,31 @@ fn editing_an_object_cancels_its_old_waiting_triggers() {
     let mut trigger = dg::read_trigger(g, nr).unwrap(); let iid = trigger.iid; trigger.wait_event = Some(98765);
     dg::add_trigger_at(g.ensure_script(GoId::Obj(item)), trigger, -1);
     g.queue_event(10, EventKind::TrigWait { go: GoId::Obj(item), iid, event_id: 98765 });
+    let command = format!("otransform {}", g.world.obj_protos[0].vnum);
+    mud_game::dg::objcmd::obj_command_interpreter(g, item, command.as_bytes());
+    assert_eq!(g.script_of(GoId::Obj(item)).unwrap().trig_list[0].iid, iid);
+    assert!(g.events.iter().any(|ev| matches!(ev.kind, EventKind::TrigWait { event_id: 98765, .. })));
     let proto = g.world.obj_protos[0].clone();
     mud_game::olc::genobj::add_object(g, &proto, proto.vnum);
     assert!(!g.events.iter().any(|ev| matches!(ev.kind, EventKind::TrigWait { event_id: 98765, .. })));
+}
+
+#[test]
+fn editing_nested_instances_of_one_prototype_is_order_independent() {
+    let mut f = fixture("nested-edit"); let g = &mut f.game;
+    let ch = player(g, b"Carrier", 12345);
+    for parent_first in [false, true] { for capacity in [0, 100] {
+        prepare_proto(g, 0, 2);
+        let first = mud_game::db::read_object(g, 0).unwrap(); let second = mud_game::db::read_object(g, 0).unwrap();
+        let (parent, child) = if parent_first { (first, second) } else { (second, first) };
+        let mut leaf = mud_game::obj::create_obj(); leaf.weight = 7; let leaf = g.objs.insert(leaf);
+        mud_game::handler::obj_to_obj(g, leaf, child); mud_game::handler::obj_to_obj(g, child, parent);
+        mud_game::handler::obj_to_char(g, parent, ch);
+        let mut proto = g.world.obj_protos[0].clone(); proto.weight = 5; proto.values[0] = capacity;
+        mud_game::olc::genobj::add_object(g, &proto, proto.vnum);
+        let expected = if capacity > 0 { 17 } else { 5 };
+        assert_eq!(g.obj(parent).weight, expected); assert_eq!(g.ch(ch).carry_weight, expected);
+        assert_eq!(g.obj(child).weight, if capacity > 0 { 12 } else { 5 });
+        mud_game::handler::extract_obj(g, parent); assert_eq!(g.ch(ch).carry_weight, 0);
+    } }
 }
