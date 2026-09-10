@@ -61,20 +61,25 @@ fn earthquake_uses_the_casts_saving_throw_category() {
     g.ch_mut(victim).affected_by = flags::FlagSet::EMPTY;
     g.ch_mut(victim).script = None;
     g.ch_mut(victim).level = 10;
-    g.ch_mut(victim).apply_saving_throw = [1000; 5];
-    g.ch_mut(victim).apply_saving_throw[SAVING_SPELL as usize] = -1000;
     g.world.rooms[0].room_flags = [0; 4];
     g.rooms[0].people = [caster, victim].into_iter().collect();
     let mut expected_rng = mud_data::rng::CircleRng::new(12345);
     let full_damage = expected_rng.dice(2, 8) + 20;
     assert!(expected_rng.rand_number(0, 99) > 1);
-    for (cast_type, expected) in [(CAST_SPELL, full_damage / 2), (CAST_WAND, full_damage)] {
+    for protected_save in [SAVING_SPELL, SAVING_ROD, SAVING_BREATH] {
+      g.ch_mut(victim).apply_saving_throw = [1000; 5];
+      g.ch_mut(victim).apply_saving_throw[protected_save as usize] = -1000;
+      for (cast_type, save) in [(CAST_SPELL, SAVING_SPELL), (CAST_WAND, SAVING_ROD),
+          (CAST_STAFF, SAVING_ROD), (CAST_SCROLL, SAVING_ROD), (CAST_POTION, SAVING_ROD),
+          (-1, SAVING_BREATH)] {
+        let expected = if save == protected_save { full_damage / 2 } else { full_damage };
         mud_game::fight::stop_fighting(g, caster);
         mud_game::fight::stop_fighting(g, victim);
         g.ch_mut(victim).position = POS_STANDING;
         g.ch_mut(victim).points.max_hit = 1000; g.ch_mut(victim).points.hit = 1000;
         g.rng = mud_data::rng::CircleRng::new(12345);
         mud_game::spell_parser::call_magic(g, caster, None, None, SPELL_EARTHQUAKE, 20, cast_type);
-        assert_eq!(1000 - g.ch(victim).points.hit, expected, "cast type {cast_type}");
+        assert_eq!(1000 - g.ch(victim).points.hit, expected, "cast type {cast_type}, protected save {protected_save}");
+      }
     }
 }
