@@ -1,4 +1,4 @@
-use mud_data::types::*;
+use mud_data::{flags, types::*};
 use mud_game::{ch::{Char, PlayerSpecials}, game::Game};
 use mud_net::descriptor::Descriptor;
 use std::path::{Path, PathBuf};
@@ -60,9 +60,22 @@ fn preference_choices_reject_minimum_integer() {
     do_oasis_prefedit(g, ch, b"", 0, 0);
     let mut olc = g.olc.remove(&di).unwrap();
     for mode in [PREFEDIT_COLOR, PREFEDIT_SYSLOG] {
-        olc.mode = mode;
-        olc = prefedit_parse(g, di, olc, b"-2147483648").unwrap();
-        assert_eq!(olc.mode, mode);
+        for input in ["-2147483648", "-2147483649", "0", "5", "2147483647", "999999999999999999999"] {
+            olc.mode = mode;
+            let before = olc.prefs.as_ref().unwrap().pref.clone();
+            olc = prefedit_parse(g, di, olc, input.as_bytes()).unwrap();
+            assert_eq!(olc.mode, mode);
+            assert_eq!(olc.prefs.as_ref().unwrap().pref, before);
+        }
+        for choice in 1..=4 {
+            olc.mode = mode;
+            olc = prefedit_parse(g, di, olc, choice.to_string().as_bytes()).unwrap();
+            let pref = &olc.prefs.as_ref().unwrap().pref;
+            let (lo, hi) = if mode == PREFEDIT_COLOR { (flags::PRF_COLOR_1, flags::PRF_COLOR_2) }
+                else { (flags::PRF_LOG1, flags::PRF_LOG2) };
+            assert_eq!(pref.is_set(lo), (choice - 1) & 1 != 0);
+            assert_eq!(pref.is_set(hi), (choice - 1) & 2 != 0);
+        }
     }
 }
 
@@ -76,9 +89,18 @@ fn quest_choices_reject_minimum_integer() {
     mud_game::handler::char_to_room(g, ch, 0);
     do_oasis_qedit(g, ch, b"3098", 0, 0);
     let mut olc = g.olc.remove(&di).unwrap();
-    olc.mode = QEDIT_TYPES;
-    let olc = qedit_parse(g, di, olc, b"-2147483648").unwrap();
-    assert_eq!(olc.mode, QEDIT_TYPES);
+    for input in ["-2147483648", "-2147483649", "0", "8", "2147483647", "999999999999999999999"] {
+        olc.mode = QEDIT_TYPES;
+        let before = olc.quest.as_ref().unwrap().type_;
+        olc = qedit_parse(g, di, olc, input.as_bytes()).unwrap();
+        assert_eq!(olc.mode, QEDIT_TYPES);
+        assert_eq!(olc.quest.as_ref().unwrap().type_, before);
+    }
+    for choice in 1..=7 {
+        olc.mode = QEDIT_TYPES;
+        olc = qedit_parse(g, di, olc, choice.to_string().as_bytes()).unwrap();
+        assert_eq!(olc.quest.as_ref().unwrap().type_, choice - 1);
+    }
 }
 
 #[test]
@@ -90,10 +112,13 @@ fn mobile_choices_clamp_minimum_integer() {
     let mut olc = OlcData::new();
     medit_setup_existing(g, &mut olc, 0);
     for mode in [MEDIT_SEX, MEDIT_POS, MEDIT_DEFAULT_POS] {
-        olc.mode = mode;
-        olc = medit_parse(g, di, olc, b"-2147483648").unwrap();
-        let mob = olc.mob.as_ref().unwrap();
-        let actual = match mode { MEDIT_SEX => mob.sex, MEDIT_POS => mob.position, _ => mob.default_pos };
-        assert_eq!(actual, 0);
+        let max = if mode == MEDIT_SEX { NUM_GENDERS as i32 } else { NUM_POSITIONS as i32 };
+        for input in [i32::MIN, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, i32::MAX] {
+            olc.mode = mode;
+            olc = medit_parse(g, di, olc, input.to_string().as_bytes()).unwrap();
+            let mob = olc.mob.as_ref().unwrap();
+            let actual = match mode { MEDIT_SEX => mob.sex, MEDIT_POS => mob.position, _ => mob.default_pos };
+            assert_eq!(actual, (i64::from(input) - 1).clamp(0, i64::from(max - 1)) as i32);
+        }
     }
 }
