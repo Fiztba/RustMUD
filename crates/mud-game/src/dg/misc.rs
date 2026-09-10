@@ -14,6 +14,29 @@ use crate::comm::{act, TO_CHAR, TO_ROOM};
 use crate::game::Game;
 use crate::handler::eq_ci;
 
+/// Unlink a script-moved item through its owning location's bookkeeping.
+pub(super) fn move_object_to_room(g: &mut Game, oid: mud_data::ids::ObjId, room: RoomRnum) -> bool {
+    use crate::handler::{obj_from_char, obj_from_obj, obj_from_room, obj_to_room, unequip_char};
+    if room == NOWHERE || room as usize >= g.rooms.len() {
+        return false;
+    }
+    let obj = g.obj(oid);
+    if obj.carried_by.is_some() {
+        obj_from_char(g, oid);
+    } else if let Some(wearer) = obj.worn_by {
+        let pos = obj.worn_on as usize;
+        unequip_char(g, wearer, pos);
+    } else if obj.in_obj.is_some() {
+        obj_from_obj(g, oid);
+    } else if obj.in_room != NOWHERE {
+        obj_from_room(g, oid);
+    } else {
+        return false;
+    }
+    obj_to_room(g, oid, room);
+    true
+}
+
 pub fn valid_dg_target(g: &Game, chid: CharId, bitvector: i32) -> bool {
     let ch = g.ch(chid);
     if ch.is_npc() {
