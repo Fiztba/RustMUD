@@ -225,6 +225,12 @@ mod tests {
         // An embedded occurrence must not hide a later matching alias.
         assert!(isname_obj(b"ring", b"shimmering ring"));
         assert!(!isname_obj(b"ring", b"boring"));
+        assert!(isname_obj(b"rin", b"shimmering ringing"));
+        assert!(isname_obj(b"RING", b"boring shimmering RING"));
+        assert!(!isname_obj(b"rings", b"shimmering ring"));
+        assert!(!isname_obj(b"ring", b""));
+        assert!(isname_obj(b"", b"ring"));
+        assert!(isname_obj(b"aab", b"aaab aab"));
     }
 }
 
