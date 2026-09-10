@@ -103,3 +103,33 @@ fn check_sale(cash: i32, bank: i32, unlimited: bool, label: &str) {
     assert_eq!(g.ch(seller).points.gold, paid);
     assert_eq!(g.ch(seller).carrying.len(), (3 - bought) as usize);
 }
+
+#[test]
+fn automatic_deposit_keeps_cash_that_will_not_fit_in_the_shop_bank() {
+    for bank in [i32::MAX, i32::MAX - 10_000, 0] {
+        let mut f = fixture(&format!("deposit-{bank}")); let g = &mut f.game;
+        let buyer = player(g, b"Buyer", 12345); descriptor(g, buyer, ConState::Playing);
+        g.ch_mut(buyer).points.gold = 100_000_000; g.ch_mut(buyer).aff_abils.str_ = 25;
+        g.ch_mut(buyer).aff_abils.dex = 25;
+        let keeper = player(g, b"Keeper", 0); g.ch_mut(keeper).act.set(flags::MOB_ISNPC);
+        g.ch_mut(keeper).mob_rnum = 0;
+        for ch in [buyer, keeper] { mud_game::handler::char_to_room(g, ch, 0); }
+        g.world.rooms[0].room_flags = [0;4];
+        g.world.shops = vec![mud_world::model::Shop {
+            profit_buy: 1.0, profit_sell: 1.0, close1: 24,
+            bitvector: mud_game::shop::WILL_BANK_MONEY,
+            in_rooms: vec![g.world.rooms[0].vnum as i32], ..Default::default()
+        }];
+        g.shops_rt = vec![mud_game::shop::ShopRt { keeper: 0, bank, ..Default::default() }];
+        let mut obj = mud_game::obj::create_obj(); obj.type_flag = flags::ITEM_TREASURE;
+        obj.cost = 100_000_000; obj.name = Some(b"gem".to_vec()); obj.short_description = Some(b"a gem".to_vec());
+        let oid = g.objs.insert(obj); mud_game::handler::obj_to_char(g, oid, keeper);
+        let cmd = mud_game::interpreter::find_command(g, b"buy").unwrap();
+        assert!(mud_game::shop::shop_keeper(g, buyer, keeper, cmd, b"gem"));
+        assert_eq!(g.ch(buyer).points.gold, 0);
+        assert_eq!(g.obj(oid).carried_by, Some(buyer));
+        assert_eq!(i64::from(g.ch(keeper).points.gold) + i64::from(g.shops_rt[0].bank), i64::from(bank) + 100_000_000);
+        assert!(g.shops_rt[0].bank >= bank);
+        if bank == 0 { assert_eq!(g.ch(keeper).points.gold, mud_game::shop::MAX_OUTSIDE_BANK); }
+    }
+}
