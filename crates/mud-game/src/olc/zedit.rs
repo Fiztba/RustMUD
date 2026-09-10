@@ -365,12 +365,18 @@ fn zedit_save_internally(g: &mut Game, di: usize, olc: &mut OlcData) {
     if olc.zone_age != 0 {
         let mut pos = remove_room_zone_commands(g, zone, room_num);
         let mut mobloaded = false;
+        let mut room_anchored = false;
         let cmds = olc.zone.as_ref().map(|z| z.cmds.clone()).unwrap_or_default();
         for cmd in cmds {
             if matches!(cmd.command, b'G' | b'E') && !mobloaded {
                 write_to_desc(g, di, b"Equip/Give command not saved since no mob was loaded first.\r\n");
                 continue;
             }
+            if cmd.command == b'P' && !room_anchored {
+                write_to_desc(g, di, b"Put command not saved since no command established its room first.\r\n");
+                continue;
+            }
+            if matches!(cmd.command, b'M' | b'O' | b'T' | b'V' | b'D' | b'R') { room_anchored = true; }
             // The reset interpreter retains its mobile across T/V/D/R/O/P.
             // P names its container explicitly and can use one already in the world.
             if cmd.command == b'M' { mobloaded = true; }

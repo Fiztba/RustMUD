@@ -103,4 +103,44 @@ fn final_zone_accepts_top_vnums_above_32000() {
     olc.zone.as_mut().unwrap().bot = 50000; olc.zone.as_mut().unwrap().top = 60000; olc.mode = ZEDIT_ZONE_TOP;
     let olc = zedit_parse(g, di, olc, b"65000").unwrap();
     assert_eq!(olc.zone.as_ref().unwrap().top, 65000);
+    let mut olc = olc; olc.mode = ZEDIT_ZONE_TOP;
+    let olc = zedit_parse(g, di, olc, b"65535").unwrap();
+    assert_eq!(olc.zone.as_ref().unwrap().top, 65534);
+    let mut olc = olc; olc.mode = ZEDIT_ZONE_TOP;
+    let olc = zedit_parse(g, di, olc, b"-1").unwrap();
+    assert_eq!(olc.zone.as_ref().unwrap().top, 50000);
+}
+
+#[test]
+fn orphan_commands_do_not_move_to_another_rooms_reset_list() {
+    let mut f = fixture("orphans"); let g = &mut f.game;
+    let ch = player(g, b"Builder", 12345); let di = descriptor(g, ch, ConState::Zedit);
+    let prefix = command(b'O', 2); g.world.zones[0].cmds = vec![prefix.clone()];
+    let mut olc = editor(g, 1); olc.zone_age = 1;
+    olc.zone.as_mut().unwrap().cmds = vec![command(b'P', 0), command(b'G', 0), command(b'M', 1), command(b'P', 0), command(b'G', 0)];
+    save(g, di, olc);
+    assert_eq!(g.world.zones[0].cmds.iter().map(|c| c.command).collect::<Vec<_>>(), b"OMPG");
+    assert_eq!(g.world.zones[0].cmds[0].arg3, 2);
+}
+
+#[test]
+fn header_dirty_fields_accumulate_without_overwriting_other_edits() {
+    use mud_game::olc::zedit::*;
+    let mut f = fixture("fields"); let g = &mut f.game;
+    let ch = player(g, b"Builder", 12345); let di = descriptor(g, ch, ConState::Zedit);
+    let mut first = editor(g, 1); let mut second = editor(g, 2);
+    for (mode, text) in [(ZEDIT_ZONE_NAME, &b"Name"[..]), (ZEDIT_ZONE_BUILDERS, b"Alice"), (ZEDIT_LEV_MIN, b"4"), (ZEDIT_ZONE_RESET, b"2")] {
+        first.mode = mode; first = zedit_parse(g, di, first, text).unwrap();
+    }
+    for (mode, text) in [(ZEDIT_ZONE_LIFE, &b"123"[..]), (ZEDIT_LEV_MAX, b"20"), (ZEDIT_ZONE_FLAGS, b"1")] {
+        second.mode = mode; second = zedit_parse(g, di, second, text).unwrap();
+    }
+    let flags = second.zone.as_ref().unwrap().zone_flags;
+    save(g, di, second); save(g, di, first);
+    let zone = &g.world.zones[0];
+    assert_eq!(zone.name.as_deref(), Some(&b"Name"[..])); assert_eq!(zone.builders.as_deref(), Some(&b"Alice"[..]));
+    assert_eq!(zone.min_level, 4); assert_eq!(zone.max_level, 20); assert_eq!(zone.lifespan, 123); assert_eq!(zone.reset_mode, 2); assert_eq!(zone.zone_flags, flags);
+    let mut olc = editor(g, 1); olc.mode = ZEDIT_LEVELS;
+    let olc = zedit_parse(g, di, olc, b"3").unwrap(); save(g, di, olc);
+    assert_eq!(g.world.zones[0].min_level, -1); assert_eq!(g.world.zones[0].max_level, -1);
 }
