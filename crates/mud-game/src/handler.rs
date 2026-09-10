@@ -502,35 +502,52 @@ pub fn obj_from_obj(g: &mut Game, oid: ObjId) {
     g.obj_mut(oid).in_obj = None;
 }
 
+/// Change a live apply without moving equipment or firing wear/remove triggers.
+pub(crate) fn change_object_apply(g: &mut Game, oid: ObjId, slot: usize, location: i32, modifier: i32) {
+    let old = g.obj(oid).affected[slot];
+    let wearer = g.obj(oid).worn_by;
+    if let Some(chid) = wearer {
+        affect_modify_ar(g, chid, old.location, old.modifier, FlagSet::EMPTY, false);
+    }
+    let apply = &mut g.obj_mut(oid).affected[slot];
+    apply.location = if modifier == 0 { flags::APPLY_NONE } else { location };
+    apply.modifier = modifier;
+    if let Some(chid) = wearer {
+        affect_modify_ar(g, chid, location, modifier, FlagSet::EMPTY, true);
+        affect_total(g, chid);
+    }
+    mark_object_changed(g, oid);
+}
+
 // ---- affects ----
 
 /// aff_apply_modify: the APPLY_* switch.
-fn aff_apply_modify(g: &mut Game, chid: CharId, loc: i32, mod_: i32) {
+fn aff_apply_modify(g: &mut Game, chid: CharId, loc: i32, mod_: i64) {
     let ch = g.ch_mut(chid);
     match loc {
         flags::APPLY_NONE => {}
-        flags::APPLY_STR => ch.aff_abils.str_ = (ch.aff_abils.str_ as i32 + mod_) as i8,
-        flags::APPLY_DEX => ch.aff_abils.dex = (ch.aff_abils.dex as i32 + mod_) as i8,
-        flags::APPLY_INT => ch.aff_abils.intel = (ch.aff_abils.intel as i32 + mod_) as i8,
-        flags::APPLY_WIS => ch.aff_abils.wis = (ch.aff_abils.wis as i32 + mod_) as i8,
-        flags::APPLY_CON => ch.aff_abils.con = (ch.aff_abils.con as i32 + mod_) as i8,
-        flags::APPLY_CHA => ch.aff_abils.cha = (ch.aff_abils.cha as i32 + mod_) as i8,
+        flags::APPLY_STR => ch.aff_abils.str_ = (ch.aff_abils.str_ as i64 + mod_) as i8,
+        flags::APPLY_DEX => ch.aff_abils.dex = (ch.aff_abils.dex as i64 + mod_) as i8,
+        flags::APPLY_INT => ch.aff_abils.intel = (ch.aff_abils.intel as i64 + mod_) as i8,
+        flags::APPLY_WIS => ch.aff_abils.wis = (ch.aff_abils.wis as i64 + mod_) as i8,
+        flags::APPLY_CON => ch.aff_abils.con = (ch.aff_abils.con as i64 + mod_) as i8,
+        flags::APPLY_CHA => ch.aff_abils.cha = (ch.aff_abils.cha as i64 + mod_) as i8,
         flags::APPLY_CLASS | flags::APPLY_LEVEL => {}
-        flags::APPLY_AGE => ch.time.birth -= mod_ as i64 * SECS_PER_MUD_YEAR as i64,
-        flags::APPLY_CHAR_WEIGHT => ch.weight = (ch.weight as i32 + mod_) as u8,
-        flags::APPLY_CHAR_HEIGHT => ch.height = (ch.height as i32 + mod_) as u8,
-        flags::APPLY_MANA => ch.points.max_mana += mod_,
-        flags::APPLY_HIT => ch.points.max_hit += mod_,
-        flags::APPLY_MOVE => ch.points.max_move += mod_,
+        flags::APPLY_AGE => ch.time.birth = ch.time.birth.wrapping_sub(mod_ * SECS_PER_MUD_YEAR as i64),
+        flags::APPLY_CHAR_WEIGHT => ch.weight = (ch.weight as i64 + mod_) as u8,
+        flags::APPLY_CHAR_HEIGHT => ch.height = (ch.height as i64 + mod_) as u8,
+        flags::APPLY_MANA => ch.points.max_mana = ch.points.max_mana.wrapping_add(mod_ as i32),
+        flags::APPLY_HIT => ch.points.max_hit = ch.points.max_hit.wrapping_add(mod_ as i32),
+        flags::APPLY_MOVE => ch.points.max_move = ch.points.max_move.wrapping_add(mod_ as i32),
         flags::APPLY_GOLD | flags::APPLY_EXP => {}
-        flags::APPLY_AC => ch.points.armor += mod_,
-        flags::APPLY_HITROLL => ch.points.hitroll = (ch.points.hitroll as i32 + mod_) as i8,
-        flags::APPLY_DAMROLL => ch.points.damroll = (ch.points.damroll as i32 + mod_) as i8,
-        flags::APPLY_SAVING_PARA => ch.apply_saving_throw[0] += mod_ as i16,
-        flags::APPLY_SAVING_ROD => ch.apply_saving_throw[1] += mod_ as i16,
-        flags::APPLY_SAVING_PETRI => ch.apply_saving_throw[2] += mod_ as i16,
-        flags::APPLY_SAVING_BREATH => ch.apply_saving_throw[3] += mod_ as i16,
-        flags::APPLY_SAVING_SPELL => ch.apply_saving_throw[4] += mod_ as i16,
+        flags::APPLY_AC => ch.points.armor = ch.points.armor.wrapping_add(mod_ as i32),
+        flags::APPLY_HITROLL => ch.points.hitroll = (ch.points.hitroll as i64 + mod_) as i8,
+        flags::APPLY_DAMROLL => ch.points.damroll = (ch.points.damroll as i64 + mod_) as i8,
+        flags::APPLY_SAVING_PARA => ch.apply_saving_throw[0] = ch.apply_saving_throw[0].wrapping_add(mod_ as i16),
+        flags::APPLY_SAVING_ROD => ch.apply_saving_throw[1] = ch.apply_saving_throw[1].wrapping_add(mod_ as i16),
+        flags::APPLY_SAVING_PETRI => ch.apply_saving_throw[2] = ch.apply_saving_throw[2].wrapping_add(mod_ as i16),
+        flags::APPLY_SAVING_BREATH => ch.apply_saving_throw[3] = ch.apply_saving_throw[3].wrapping_add(mod_ as i16),
+        flags::APPLY_SAVING_SPELL => ch.apply_saving_throw[4] = ch.apply_saving_throw[4].wrapping_add(mod_ as i16),
         _ => {
             g.log(format!("SYSERR: Unknown apply adjust {} attempt (affect_modify).", loc));
         }
@@ -572,7 +589,10 @@ fn innate_affects(g: &Game, chid: CharId) -> FlagSet {
 
 /// affect_modify_ar.
 fn affect_modify_ar(g: &mut Game, chid: CharId, loc: i32, mod_: i32, bitv: FlagSet, add: bool) {
-    let mut mod_ = mod_;
+    // Widen before negating: i32::MIN is a valid stored object modifier.
+    // Fixed-width stats use explicit wrapping arithmetic so apply/remove stay
+    // reversible at their representation limits in debug and release builds.
+    let mut mod_ = i64::from(mod_);
     if add {
         for bit in 0..128 {
             if bitv.is_set(bit) {

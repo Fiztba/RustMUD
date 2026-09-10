@@ -1410,13 +1410,8 @@ fn oset_apply(g: &mut Game, o: ObjId, argument: &[u8]) -> bool {
     if location == -1 {
         return false;
     }
-    let slot = &mut ob.affected[location as usize];
-    slot.modifier = prev_mod + value;
-    if slot.modifier != 0 {
-        slot.location = apply;
-    } else {
-        slot.location = mud_data::flags::APPLY_NONE;
-    }
+    let Some(modifier) = prev_mod.checked_add(value) else { return false };
+    crate::handler::change_object_apply(g, o, location as usize, apply, modifier);
     true
 }
 
