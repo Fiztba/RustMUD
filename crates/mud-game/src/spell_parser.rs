@@ -223,20 +223,31 @@ pub fn call_magic(
         return 0;
     }
 
+    let char_available = |g: &Game, id| g.try_ch(id).is_some_and(|ch|
+        !ch.plr(flags::PLR_NOTDEADYET) && !ch.mob_flagged(flags::MOB_NOTDEADYET));
+    let targets_exist = |g: &Game| char_available(g, caster)
+        && cvict.is_none_or(|v| char_available(g, v))
+        && ovict.is_none_or(|o| g.try_obj(o).is_some());
+    if !targets_exist(g) { return 0; }
+
     // Cast triggers: wld, then obj, then mob.
     if crate::dg::triggers::cast_wtrigger(g, caster, cvict, ovict, spellnum) == 0 {
         return 0;
     }
+    if !targets_exist(g) { return 0; }
     if let Some(ov) = ovict {
         if crate::dg::triggers::cast_otrigger(g, caster, ov, spellnum) == 0 {
             return 0;
         }
     }
+    if !targets_exist(g) { return 0; }
     if let Some(cv) = cvict {
         if crate::dg::triggers::cast_mtrigger(g, caster, cv, spellnum) == 0 {
             return 0;
         }
     }
+
+    if !targets_exist(g) { return 0; }
 
     let room = g.ch(caster).in_room;
     let room_flag = |g: &Game, bit: usize| {

@@ -89,3 +89,80 @@ fn magic_item_case(kind: i32, verb: &[u8]) {
 #[test] fn wand_use_survives_listener_extraction() { magic_item_case(flags::ITEM_WAND, b"points"); }
 #[test] fn scroll_use_survives_listener_extraction() { magic_item_case(flags::ITEM_SCROLL, b"recites"); }
 #[test] fn potion_use_survives_listener_extraction() { magic_item_case(flags::ITEM_POTION, b"quaffs"); }
+
+#[test]
+fn wand_use_survives_listener_extraction_of_its_target() {
+    let mut f = fixture("target"); let g = &mut f.game;
+    let actor = player(g, b"Actor", 12345); char_to_room(g, actor, 0); g.rooms[0].light = 1;
+    descriptor(g, actor, ConState::Playing);
+    listener(g, b"points", &[b"mpurge %target%"]);
+    let wand = item(g, b"wand"); g.obj_mut(wand).type_flag = flags::ITEM_WAND;
+    g.obj_mut(wand).values = [20, 5, 5, mud_data::spells::SPELL_CREATE_WATER];
+    obj_to_char(g, wand, actor);
+    let target = item(g, b"target"); g.obj_mut(target).type_flag = flags::ITEM_DRINKCON;
+    g.obj_mut(target).values = [10, 0, 0, 0]; obj_to_room(g, target, 0);
+    let nr = g.world.triggers.len() as u16;
+    g.world.triggers.push(mud_world::model::Trigger {
+        vnum: 65000, attach_type: dg::WLD_TRIGGER, trigger_type: dg::WTRIG_CAST,
+        narg: 100, cmdlist: vec![b"return 1".to_vec()], ..Default::default()
+    });
+    let trigger = dg::read_trigger(g, nr).unwrap();
+    dg::add_trigger_at(g.ensure_script(GoId::Room(0)), trigger, -1);
+    mud_game::spell_parser::mag_objectmagic(g, actor, wand, b"target");
+    assert!(g.try_obj(target).is_none());
+    assert!(g.try_obj(wand).is_some());
+}
+
+#[test]
+fn ordinary_magic_items_still_cast_and_spend_their_resources() {
+    let mut f = fixture("normal"); let g = &mut f.game;
+    let actor = player(g, b"Actor", 12345); char_to_room(g, actor, 0);
+    g.world.rooms[0].room_flags = [0; 4]; g.rooms[0].light = 1;
+    descriptor(g, actor, ConState::Playing);
+    listener(g, b"never", &[]);
+    for kind in [flags::ITEM_STAFF, flags::ITEM_WAND, flags::ITEM_SCROLL, flags::ITEM_POTION] {
+        g.ch_mut(actor).points.max_hit = 100; g.ch_mut(actor).points.hit = 50;
+        let oid = item(g, b"item"); g.obj_mut(oid).type_flag = kind;
+        g.obj_mut(oid).values = [20, SPELL_CURE_LIGHT, SPELL_CURE_LIGHT, SPELL_CURE_LIGHT];
+        obj_to_char(g, oid, actor);
+        mud_game::spell_parser::mag_objectmagic(g, actor, oid, if kind == flags::ITEM_WAND { b"Actor" } else { b"" });
+        if kind == flags::ITEM_STAFF || kind == flags::ITEM_WAND {
+            assert_eq!(g.obj(oid).values[2], SPELL_CURE_LIGHT - 1);
+        } else { assert!(g.try_obj(oid).is_none()); }
+        if kind != flags::ITEM_STAFF { assert!(g.ch(actor).points.hit > 50, "kind {kind}"); }
+    }
+}
+#[test]
+fn a_potion_moved_by_its_announcement_is_not_cast_or_consumed() {
+    let mut f = fixture("relocated"); let g = &mut f.game;
+    let actor = player(g, b"Actor", 12345); char_to_room(g, actor, 0); g.rooms[0].light = 1;
+    descriptor(g, actor, ConState::Playing);
+    g.ch_mut(actor).points.max_hit = 100; g.ch_mut(actor).points.hit = 50;
+    listener(g, b"quaffs", &[b"mforce %actor% drop item"]);
+    let oid = item(g, b"item"); g.obj_mut(oid).type_flag = flags::ITEM_POTION;
+    g.obj_mut(oid).values = [20, SPELL_CURE_LIGHT, SPELL_CURE_LIGHT, SPELL_CURE_LIGHT];
+    obj_to_char(g, oid, actor);
+    mud_game::spell_parser::mag_objectmagic(g, actor, oid, b"");
+    assert_eq!(g.obj(oid).in_room, 0);
+    assert_eq!(g.ch(actor).points.hit, 50);
+}
+
+#[test]
+fn cast_trigger_extraction_cancels_magic_before_it_heals_the_removed_target() {
+    let mut f = fixture("cast-removal"); let g = &mut f.game;
+    let actor = player(g, b"Actor", 12345); char_to_room(g, actor, 0);
+    g.world.rooms[0].room_flags = [0; 4];
+    let victim = mud_game::db::read_mobile(g, 0).unwrap(); char_to_room(g, victim, 0);
+    g.ch_mut(victim).points.max_hit = 100; g.ch_mut(victim).points.hit = 50;
+    let nr = g.world.triggers.len() as u16;
+    g.world.triggers.push(mud_world::model::Trigger {
+        vnum: 65000, attach_type: dg::WLD_TRIGGER, trigger_type: dg::WTRIG_CAST,
+        narg: 100, cmdlist: vec![b"wpurge %victim%".to_vec(), b"return 1".to_vec()], ..Default::default()
+    });
+    let trigger = dg::read_trigger(g, nr).unwrap();
+    dg::add_trigger_at(g.ensure_script(GoId::Room(0)), trigger, -1);
+    let result = mud_game::spell_parser::call_magic(g, actor, Some(victim), None, SPELL_CURE_LIGHT, 20, mud_data::spells::CAST_SPELL);
+    assert_eq!(result, 0);
+    assert!(g.ch(victim).mob_flagged(flags::MOB_NOTDEADYET));
+    assert_eq!(g.ch(victim).points.hit, 50);
+}
