@@ -572,10 +572,14 @@ fn board_remove_msg(g: &mut Game, board: usize, chid: CharId, arg: &[u8]) -> boo
         return true;
     };
 
-    let mut paren = b"(".to_vec();
-    paren.extend_from_slice(g.ch(chid).get_name());
-    paren.push(b')');
-    let mine = heading.windows(paren.len()).any(|w| w == &paren[..]);
+    // The subject is player-supplied; ownership comes only from the author field.
+    let author = heading.windows(4).position(|w| w == b" :: ").and_then(|separator| {
+        let metadata = &heading[..separator];
+        let start = metadata.iter().position(|&c| c == b'(')? + 1;
+        let end = metadata[start..].iter().position(|&c| c == b')')? + start;
+        Some(&metadata[start..end])
+    });
+    let mine = author == Some(g.ch(chid).get_name());
     if g.ch(chid).level < BOARD_INFO[board].remove_lvl && !mine {
         send_to_char(g, chid, b"You are not holy enough to remove other people's messages.\r\n");
         return true;
