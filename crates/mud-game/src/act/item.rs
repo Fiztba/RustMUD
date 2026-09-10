@@ -624,23 +624,23 @@ pub fn do_drop(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd:
         }
         SCMD_DONATE => {
             mode = SCMD_DONATE;
-            // Donation room selection: fail + double chance for room 1.
+            // Preserve the failure outcome and room one's double weight, but
+            // build the choices from rooms that actually exist.
             let cfg = &g.config;
-            let num_don_rooms = (cfg.donation_room_1 != NOWHERE as i32) as i32 * 2
-                + (cfg.donation_room_2 != NOWHERE as i32) as i32
-                + (cfg.donation_room_3 != NOWHERE as i32) as i32
-                + 1;
-            let (r1, r2, r3) = (cfg.donation_room_1, cfg.donation_room_2, cfg.donation_room_3);
-            match g.rng.rand_number(0, num_don_rooms) {
-                0 => mode = SCMD_JUNK,
-                1 | 2 => rdr = g.real_room(r1).unwrap_or(NOWHERE),
-                3 => rdr = g.real_room(r2).unwrap_or(NOWHERE),
-                4 => rdr = g.real_room(r3).unwrap_or(NOWHERE),
-                _ => {}
+            let mut destinations = vec![None];
+            for (vnum, weight) in [(cfg.donation_room_1, 2), (cfg.donation_room_2, 1), (cfg.donation_room_3, 1)] {
+                if let Some(room) = g.real_room(vnum) {
+                    destinations.extend(std::iter::repeat_n(Some(room), weight));
+                }
             }
-            if rdr == NOWHERE {
+            if destinations.len() == 1 {
                 send_to_char(g, chid, b"Sorry, you can't donate anything right now.\r\n");
                 return;
+            }
+            let choice = g.rng.rand_number(0, destinations.len() as i32 - 1) as usize;
+            match destinations[choice] {
+                Some(room) => rdr = room,
+                None => mode = SCMD_JUNK,
             }
             b"donate"
         }
@@ -1383,6 +1383,8 @@ pub fn do_pour(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd:
         let liq = g.obj(from_obj).values[2];
         g.obj_mut(to_obj).values[2] = liq;
     }
+    // Capture poison before emptying and clearing the source.
+    let poisoned = g.obj(to_obj).values[3] != 0 || g.obj(from_obj).values[3] != 0;
     // Then how much to pour.
     let amount;
     if limited_drink_container(g, from_obj) {
@@ -1403,7 +1405,6 @@ pub fn do_pour(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd:
         g.obj_mut(to_obj).values[1] = max;
     }
     // Poisoned?
-    let poisoned = (g.obj(to_obj).values[3] != 0) || (g.obj(from_obj).values[3] != 0);
     g.obj_mut(to_obj).values[3] = poisoned as i32;
     // Weight change, except for unlimited.
     if limited_drink_container(g, from_obj) {
@@ -1630,22 +1631,21 @@ pub fn do_wear(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd
             send_to_char(g, chid, &msg);
             return;
         };
-        // NOTE, a quirk: the level gate applies only to the FIRST match.
-        if (g.ch(chid).level as i32) < g.obj(first).level {
-            send_to_char(g, chid, b"You are not experienced enough to use that.\r\n");
-            return;
-        }
-        let mut obj = Some(first);
-        while let Some(o) = obj {
-            let list_after = carrying_after(g, chid, o);
-            let next = get_obj_in_list_vis(g, chid, &name, None, &list_after);
+        for o in carrying.into_iter().skip_while(|&o| o != first) {
+            if !g.try_obj_alive(o) || g.obj(o).carried_by != Some(chid)
+                || !can_see_obj(g, chid, o) || !handler::isname(&name, handler::obj_name(g, o)) {
+                continue;
+            }
+            if (g.ch(chid).level as i32) < g.obj(o).level {
+                send_to_char(g, chid, b"You are not experienced enough to use that.\r\n");
+                continue;
+            }
             match find_eq_pos(g, chid, o, b"") {
                 Some(where_) => perform_wear(g, chid, o, where_),
                 None => {
                     act(g, b"You can't wear $p.", false, Some(chid), Some(o), None, comm::TO_CHAR);
                 }
             }
-            obj = next;
         }
     } else {
         let carrying = g.ch(chid).carrying.clone();
