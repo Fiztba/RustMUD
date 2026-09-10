@@ -662,6 +662,11 @@ pub fn do_oasis_list(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, s
 
     if smin.is_empty() || smin[0] == b'.' {
         rzone = Some(g.world.rooms[g.ch(chid).in_room as usize].zone as usize);
+    } else if (subcmd == SCMD_OASIS_MLIST
+        && [b"help".as_slice(), b"level", b"flags"].iter().any(|word| is_abbrev(&smin, word)))
+        || (subcmd == SCMD_OASIS_OLIST && !smin[0].is_ascii_digit())
+    {
+        // These forms select their own results and do not name a zone or vnum range.
     } else if smax.is_empty() {
         rzone = g.world.real_zone(atoi(&smin) as Idx).map(|z| z as usize);
         if matches!(rzone, None | Some(0))
@@ -923,10 +928,6 @@ fn list_rooms(g: &mut Game, chid: CharId, rnum: Option<usize>, vmin: i32, vmax: 
         b"Index VNum    Room Name                                    Exits\r\n\
           ----- ------- -------------------------------------------- -----\r\n",
     );
-    // A one-room world prints nothing at all.
-    if g.world.rooms.len() <= 1 {
-        return;
-    }
 
     let dirs = crate::fight::dir_count(g);
     let mut counter = 0;
@@ -989,9 +990,6 @@ fn list_mobiles(g: &mut Game, chid: CharId, rnum: Option<usize>, vmin: i32, vmax
         b"Index VNum    Mobile Name                                  Level\r\n\
           ----- ------- -------------------------------------------- -----\r\n",
     );
-    if g.world.mob_protos.len() <= 1 {
-        return;
-    }
 
     let mut counter = 0;
     for i in 0..g.world.mob_protos.len() {
@@ -1042,9 +1040,6 @@ fn list_objects(g: &mut Game, chid: CharId, rnum: Option<usize>, vmin: i32, vmax
         b"Index VNum    Object Name                                  Object Type\r\n\
           ----- ------- -------------------------------------------- ----------------\r\n",
     );
-    if g.world.obj_protos.len() <= 1 {
-        return;
-    }
 
     let mut counter = 0;
     for i in 0..g.world.obj_protos.len() {
@@ -1184,9 +1179,6 @@ fn list_zones(
         b"VNum  Zone Name                      Builder(s)\r\n\
           ----- ------------------------------ --------------------------------------\r\n",
     );
-    if g.world.zones.len() <= 1 {
-        return;
-    }
 
     let mut counter = 0;
     for i in 0..g.world.zones.len() {
