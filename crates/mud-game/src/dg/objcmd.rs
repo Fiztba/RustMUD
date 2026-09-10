@@ -16,8 +16,8 @@ use super::{
 };
 use crate::game::Game;
 use crate::handler::{
-    char_from_room, char_to_room, equip_char, extract_char, extract_obj, obj_from_char,
-    obj_from_obj, obj_from_room, obj_to_char, obj_to_obj, obj_to_room, eq_ci, unequip_char,
+    char_from_room, char_to_room, equip_char, extract_char, extract_obj,
+    obj_to_char, obj_to_obj, obj_to_room, eq_ci, unequip_char,
 };
 
 pub type BStr = Vec<u8>;
