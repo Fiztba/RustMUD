@@ -1012,7 +1012,7 @@ fn parse_edit_action(
                 return;
             }
             let line_low = parse_int_prefix(&arg1);
-            append_within(&mut insert_text, b"\r\n", MAX_STRING_LENGTH - 1);
+            insert_text.extend_from_slice(b"\r\n");
 
             let mut i: i32 = 1;
             let max_str = eb.max_str;
@@ -1035,11 +1035,7 @@ fn parse_edit_action(
                     msgs.push(b"Line number out of range; insert aborted.\r\n".to_vec());
                     return;
                 };
-                // strlen(*d->str) [prefix, *s nulled] + strlen(buf2) +
-                // strlen(s + 1) + 3 > d->max_str. strlen(s+1) reads past the
-                // terminator when s is at the end (UB); stand-in: 0.
-                let suffix_after_first = buf.len().saturating_sub(pos).saturating_sub(1);
-                if pos + insert_text.len() + suffix_after_first + 3 > max_str {
+                if buf.len().saturating_add(insert_text.len()) >= max_str {
                     msgs.push(
                         b"Insert text pushes buffer over maximum size, insert aborted.\r\n"
                             .to_vec(),
@@ -1048,11 +1044,11 @@ fn parse_edit_action(
                 }
                 let mut new_buf: Vec<u8> = Vec::new();
                 if pos > 0 {
-                    append_within(&mut new_buf, &buf[..pos], MAX_STRING_LENGTH);
+                    new_buf.extend_from_slice(&buf[..pos]);
                 }
-                append_within(&mut new_buf, &insert_text, MAX_STRING_LENGTH);
+                new_buf.extend_from_slice(&insert_text);
                 if pos < buf.len() {
-                    append_within(&mut new_buf, &buf[pos..], MAX_STRING_LENGTH);
+                    new_buf.extend_from_slice(&buf[pos..]);
                 }
                 *buf = new_buf;
                 msgs.push(b"Line inserted.\r\n".to_vec());
@@ -1068,7 +1064,7 @@ fn parse_edit_action(
                 return;
             }
             let line_low = parse_int_prefix(&arg1);
-            append_within(&mut new_line, b"\r\n", MAX_STRING_LENGTH - 1);
+            new_line.extend_from_slice(b"\r\n");
 
             let mut i: i32 = 1;
             let max_str = eb.max_str;
@@ -1095,13 +1091,13 @@ fn parse_edit_action(
                 };
                 let mut new_buf: Vec<u8> = Vec::new();
                 if pos != 0 {
-                    append_within(&mut new_buf, &buf[..pos], MAX_STRING_LENGTH);
+                    new_buf.extend_from_slice(&buf[..pos]);
                 }
-                append_within(&mut new_buf, &new_line, MAX_STRING_LENGTH);
+                new_buf.extend_from_slice(&new_line);
                 if let Some(q) = find_nl(buf, pos) {
-                    append_within(&mut new_buf, &buf[q + 1..], MAX_STRING_LENGTH);
+                    new_buf.extend_from_slice(&buf[q + 1..]);
                 }
-                if new_buf.len() > max_str {
+                if new_buf.len() >= max_str {
                     msgs.push(
                         b"Change causes new length to exceed buffer maximum size, aborted.\r\n"
                             .to_vec(),
@@ -1654,6 +1650,35 @@ mod tests {
         let (_, m, _) = add(&mut eb, b"/d 4");
         assert_eq!(m, vec![b"0 lines deleted.\r\n".to_vec()]);
         assert_eq!(buf(&eb), b"one\r\ntwo\r\nthree\r\n");
+    }
+
+
+    #[test]
+    fn line_edits_reject_overflow_without_losing_the_document_tail() {
+        let mut original = b"x\r\n".to_vec();
+        original.extend(vec![b'z'; MAX_STRING_LENGTH - 10]);
+        original.extend_from_slice(b"END\r\n");
+        let mut eb = EditBuf { buf: Some(original.clone()), max_str: MAX_STRING_LENGTH };
+        let (_, messages, _) = add(&mut eb, b"/e 1 this line is too long");
+        assert_eq!(buf(&eb), original);
+        assert!(messages[0].windows(7).any(|w| w == b"aborted"));
+    }
+
+    #[test]
+    fn line_changes_preserve_large_buffers_and_accept_the_exact_capacity() {
+        let mut original = b"x\r\n".to_vec();
+        original.extend(vec![b'z'; MAX_STRING_LENGTH]);
+        original.extend_from_slice(b"END\r\n");
+        for command in [b"/e 1 y".as_slice(), b"/i 1 y".as_slice()] {
+            let expected = if command[1] == b'e' {
+                let mut out = original.clone(); out[0] = b'y'; out
+            } else {
+                let mut out = b"y\r\n".to_vec(); out.extend_from_slice(&original); out
+            };
+            let mut eb = EditBuf { buf: Some(original.clone()), max_str: expected.len() + 1 };
+            add(&mut eb, command);
+            assert_eq!(buf(&eb), expected);
+        }
     }
 
     // -- /e and /i -----------------------------------------------------------
