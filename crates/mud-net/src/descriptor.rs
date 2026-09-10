@@ -493,9 +493,8 @@ impl Descriptor {
                 while cmdline.first().is_some_and(|c| c.is_ascii_whitespace() && *c != b'\t') {
                     cmdline = &cmdline[1..];
                 }
-                let starting_pos = self.history_pos;
                 let mut cnt = if self.history_pos == 0 { HISTORY_SIZE - 1 } else { self.history_pos - 1 };
-                while cnt != starting_pos {
+                for _ in 0..HISTORY_SIZE {
                     if !self.history[cnt].is_empty() && is_abbrev(cmdline, &self.history[cnt]) {
                         tmp = self.history[cnt].clone();
                         self.last_input = tmp.clone();
@@ -1073,6 +1072,19 @@ mod tests {
         let lines: Vec<_> = d.input.drain(..).map(|x| x.0).collect();
         assert_eq!(lines, vec![b"cast armor".to_vec(), b"look".to_vec(), b"cast armor".to_vec()]);
         assert!(d.output.windows(12).any(|w| w == b"cast armor\r\n"));
+    }
+
+    #[test]
+    fn history_prefix_recall_includes_oldest_entry_after_wrap() {
+        for offset in 0..HISTORY_SIZE {
+            let mut d = desc();
+            for _ in 0..offset { d.feed_input_test(b"discarded\r\n").unwrap(); }
+            d.feed_input_test(b"oldest command\r\n").unwrap();
+            for _ in 1..HISTORY_SIZE { d.feed_input_test(b"look\r\n").unwrap(); }
+            d.input.clear();
+            d.feed_input_test(b"!oldest\r\n").unwrap();
+            assert_eq!(d.input.pop_front().unwrap().0, b"oldest command", "offset {offset}");
+        }
     }
 
     #[test]
