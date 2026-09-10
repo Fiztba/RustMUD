@@ -123,9 +123,7 @@ pub fn copyover_set(p: &mut mud_net::protocol::ProtocolState, data: &[u8]) {
     p.negotiated = true;
 }
 
-/// do_copyover. Everything up to the `execl`: the
-/// per-player save, the "remain seated" notice, and the plan the binary needs
-/// to hand the sockets over.
+/// Request a copyover and notify players. Snapshot state after the pulse finishes.
 pub fn do_copyover(g: &mut Game, chid: CharId, _argument: &[u8], _cmd: usize, _subcmd: i32) {
     // copyover.dat is opened first: bail out if it is not writable. The probe
     // file is then removed, because the real one is not written until the
@@ -142,8 +140,18 @@ pub fn do_copyover(g: &mut Game, chid: CharId, _argument: &[u8], _cmd: usize, _s
     let name = String::from_utf8_lossy(g.ch(chid).get_name()).into_owned();
     let notice = format!("\r\n *** COPYOVER by {} - please remain seated!\r\n", name);
 
-    let mut plan = CopyoverPlan { boot_time: g.boot_time, ..Default::default() };
+    for di in g.descriptors.order.clone() {
+        if g.descriptors.get(di).is_some_and(|d| d.character.is_some() && d.state == ConState::Playing) {
+            crate::comm::write_direct(g, di, notice.as_bytes());
+        }
+    }
+    g.copyover = Some(CopyoverPlan { boot_time: g.boot_time, ..Default::default() });
+}
 
+/// Prepare socket and persistence state after the final game pulse.
+/// Player inventories, rooms, and houses can all change after the request.
+pub fn take_copyover_plan(g: &mut Game) -> Option<CopyoverPlan> {
+    let mut plan = g.copyover.take()?;
     for di in g.descriptors.order.clone() {
         let Some(d) = g.descriptors.get(di) else { continue };
         let och = d.character;
@@ -205,17 +213,7 @@ pub fn do_copyover(g: &mut Game, chid: CharId, _argument: &[u8], _cmd: usize, _s
         g.ch_mut(och).ps_mut().load_room = vnum as Idx;
         crate::objsave::crash_rentsave(g, och, 0);
         crate::players_glue::save_char(g, och);
-        crate::comm::write_direct(g, di, notice.as_bytes());
     }
-
-    g.copyover = Some(plan);
-}
-
-/// Take the requested handoff after the current game pulse has finished.
-/// Houses may have changed since the command ran, and the successor reloads
-/// their contents from disk just like a normal boot.
-pub fn take_copyover_plan(g: &mut Game) -> Option<CopyoverPlan> {
-    let plan = g.copyover.take()?;
     crate::house::house_save_all(g);
     Some(plan)
 }
