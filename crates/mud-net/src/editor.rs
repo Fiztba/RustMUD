@@ -1,5 +1,5 @@
 //! The line editor: the buffer-append half of `string_add` plus
-//! the entire improved editor — `improved_editor_execute`,
+//! the entire improved editor â€” `improved_editor_execute`,
 //! `parse_edit_action`, `format_text`, `replace_str`, and the
 //! `parse_at`/`parse_tab`/`smash_tilde` helpers.
 //!
@@ -295,7 +295,7 @@ fn itoa(v: i32) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------------------------
-// string_add — the buffer-append half
+// string_add â€” the buffer-append half
 // ---------------------------------------------------------------------------
 
 /// Feed one input line to the editor. Returns the resulting action and the
@@ -819,7 +819,7 @@ fn parse_edit_action(
                 }
                 let tail_from = s.and_then(|p| find_nl(buf, p));
                 if let Some(q) = tail_from {
-                    // while (*(++s)) *(t++) = *s; — shift the tail after
+                    // while (*(++s)) *(t++) = *s; â€” shift the tail after
                     // line_high's '\n' down to t, then terminate.
                     let tail: Vec<u8> = buf[q + 1..].to_vec();
                     buf.truncate(t);
@@ -1239,7 +1239,7 @@ fn format_text(eb: &mut EditBuf, mode: i32, low: i32, high: i32, msgs: &mut Vec<
         match find_nl(&orig, fpos) {
             Some(q) => fpos = q + 1,
             None => {
-                // No newline left to advance past — treat as "not enough
+                // No newline left to advance past â€” treat as "not enough
                 // lines".
                 msgs.push(b"There aren't that many lines!\r\n".to_vec());
                 return 0;
@@ -1779,6 +1779,46 @@ mod tests {
     }
 
     #[test]
+    fn replacement_matches_reference_and_is_atomic_at_every_limit() {
+        for original in ["", "a", "aaaa", "banana", "tail aa tail", "abc\r\ndef\r\n"] {
+            for pattern in ["a", "aa", "banana", "absent-long-pattern", "\r\n"] {
+                for replacement in ["", "b", "aa", "longer replacement"] {
+                    for all in [false, true] {
+                        let expected = original.replacen(pattern, replacement, if all { usize::MAX } else { 1 });
+                        for limit in 0..=expected.len() + 2 {
+                            let mut text = original.as_bytes().to_vec();
+                            let count = replace_str(&mut text, pattern.as_bytes(), replacement.as_bytes(), all, limit as u32);
+                            if !original.contains(pattern) {
+                                assert_eq!(count, 0);
+                                assert_eq!(text, original.as_bytes());
+                            } else if expected.len() >= limit {
+                                assert_eq!(count, -1);
+                                assert_eq!(text, original.as_bytes());
+                            } else {
+                                assert!(count > 0);
+                                assert_eq!(text, expected.as_bytes());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn script_formatter_preserves_deep_nesting_or_rejects_atomically() {
+        let original = format!("{}say hi\r\n{}", "if 1\r\n".repeat(130), "end\r\n".repeat(130));
+        let mut full = EditBuf { buf: Some(original.as_bytes().to_vec()), max_str: 100000 };
+        assert!(format_script(&mut full, &mut Vec::new()));
+        assert!(buf(&full).windows(268).any(|line| line == format!("{}say hi\r\n", " ".repeat(260)).as_bytes()));
+        for limit in [0, 1, original.len(), buf(&full).len()] {
+            let mut eb = EditBuf { buf: Some(original.as_bytes().to_vec()), max_str: limit };
+            assert!(!format_script(&mut eb, &mut Vec::new()));
+            assert_eq!(buf(&eb), original.as_bytes());
+        }
+    }
+
+    #[test]
     fn formatting_overflow_preserves_original() {
         for max_str in [0, 5, 10, MAX_STRING_LENGTH] {
             let original = if max_str == MAX_STRING_LENGTH {
@@ -1899,7 +1939,7 @@ mod tests {
     #[test]
     fn format_invalid_range_uses_literal_backslash_message() {
         // This message carries a literal backslash-r backslash-n, not a
-        // CRLF — that is what the player receives.
+        // CRLF â€” that is what the player receives.
         let mut eb = three_lines();
         let (_, m, _) = add(&mut eb, b"/f 2 - 1");
         assert_eq!(m, vec![b"That range is invalid.\\r\\n".to_vec()]);
