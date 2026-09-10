@@ -809,7 +809,7 @@ fn main() {
     drain_logs(&mut g, &mut logger);
     if g.circle_reboot != 0 {
         logger.log(g.now, "Rebooting.");
-        relaunch(&args, g.now, &mut logger);
+        relaunch(&args, listener, g.now, &mut logger);
     }
     logger.log(g.now, "Normal termination of game.");
 }
@@ -834,7 +834,10 @@ fn main() {
 /// already back and a loop that restarted on 52 would start a second copy.
 /// 52 is reached only when the relaunch itself failed, which is the one
 /// case where outside help is still wanted.
-fn relaunch(args: &[String], now: i64, logger: &mut Logger) {
+fn relaunch(args: &[String], listener: TcpListener, now: i64, logger: &mut Logger) {
+    // An adopted Unix copyover listener has CLOEXEC cleared. Exec does not
+    // drop Rust values, so release the port before launching a fresh server.
+    drop(listener);
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from(&args[0]));
     let mut cmd = std::process::Command::new(&exe);
     let mut skip = false;
@@ -861,6 +864,44 @@ fn relaunch(args: &[String], now: i64, logger: &mut Logger) {
             logger.log(now, &format!("SYSERR: reboot: spawn: {}", e));
             std::process::exit(52);
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod reboot_tests {
+    use super::*;
+
+    const ADDRESS: &str = "RUSTMUD_REBOOT_TEST_ADDRESS";
+
+    #[test]
+    fn inherited_listener_is_closed_before_reboot() {
+        let Ok(address) = std::env::var(ADDRESS) else {
+            let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = reservation.local_addr().unwrap();
+            drop(reservation);
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "reboot_tests::inherited_listener_is_closed_before_reboot"])
+                .env(ADDRESS, address.to_string())
+                .status().unwrap();
+            assert!(status.success(), "reboot successor could not bind the port");
+            return;
+        };
+        let listener = TcpListener::bind(address.parse().unwrap()).unwrap();
+        let fd = mud_sys::keep_open(&listener).unwrap();
+        let args = vec![
+            std::env::current_exe().unwrap().to_string_lossy().into_owned(),
+            "--exact".into(), "reboot_tests::reboot_successor_binds_port".into(),
+            format!("-C{fd}"),
+        ];
+        let mut logger = Logger { file: None, tz: 0, lib: std::env::temp_dir() };
+        relaunch(&args, listener, 0, &mut logger);
+        panic!("relaunch returned");
+    }
+
+    #[test]
+    fn reboot_successor_binds_port() {
+        let Ok(address) = std::env::var(ADDRESS) else { return };
+        let _listener = std::net::TcpListener::bind(address).expect("inherited listener still owns port");
     }
 }
 
