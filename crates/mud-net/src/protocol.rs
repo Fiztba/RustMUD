@@ -189,8 +189,7 @@ pub static VAR_TABLE: [VarDef; NUM_VARS] = [
     vd!(b"MXP", boolean(0)),
     vd!(b"BUTTON_1", str_gui(b"\x05\x02Help\x02help\x06")),
     vd!(b"BUTTON_2", str_gui(b"\x05\x02Look\x02look\x06")),
-    // The Score button sends "help".
-    vd!(b"BUTTON_3", str_gui(b"\x05\x02Score\x02help\x06")),
+    vd!(b"BUTTON_3", str_gui(b"\x05\x02Score\x02score\x06")),
     vd!(b"BUTTON_4", str_gui(b"\x05\x02Equipment\x02equipment\x06")),
     vd!(b"BUTTON_5", str_gui(b"\x05\x02Inventory\x02inventory\x06")),
     vd!(b"GAUGE_1", str_gui(b"\x05\x02Health\x02red\x02HEALTH\x02HEALTH_MAX\x06")),
