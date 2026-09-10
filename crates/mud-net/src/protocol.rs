@@ -723,12 +723,9 @@ fn perform_ttype(p: &mut ProtocolState, data: &[u8], output_empty: bool) {
         // Stored only here, not on every response: the response that ends the
         // cycle leaves the one before it recorded.
         p.last_ttype = Some(name.clone());
-        // 256 colours by terminal name. C takes everything from the FIRST
-        // hyphen and requires that to equal "-256color", so a second hyphen
-        // disqualifies the name: "rxvt-unicode-256color" is not a 256-colour
-        // terminal to C, however much it reads like one.
-        let from_hyphen = name.iter().position(|c| *c == b'-').map(|i| &name[i..]);
-        if from_hyphen.is_some_and(|s| s.eq_ignore_ascii_case(b"-256color"))
+        // Terminal families may contain hyphens; the capability is the suffix.
+        if name.get(name.len().saturating_sub(9)..)
+            .is_some_and(|suffix| suffix.eq_ignore_ascii_case(b"-256color"))
             || name.eq_ignore_ascii_case(b"xterm")
         {
             p.vars[Var::XTERM_256_COLORS as usize].value_int = 1;
@@ -1788,17 +1785,14 @@ mod tests {
         assert_eq!(requests(&p), 1, "a later ANSI should still be cycled past");
     }
 
-    /// C takes everything from the FIRST hyphen and requires it to equal
-    /// "-256color", so a name with a second hyphen does not qualify.
     #[test]
-    fn ttype_256color_suffix_must_follow_the_first_hyphen() {
-        let mut p = ProtocolState::new();
-        ttype(&mut p, b"screen-256color");
-        assert_eq!(p.var_int(Var::XTERM_256_COLORS), 1);
-
-        let mut p = ProtocolState::new();
-        ttype(&mut p, b"rxvt-unicode-256color");
-        assert_eq!(p.var_int(Var::XTERM_256_COLORS), 0, "second hyphen must disqualify the name");
+    fn ttype_256color_suffix_accepts_multi_hyphen_names() {
+        for name in [b"screen-256color".as_slice(), b"rxvt-unicode-256color", b"SCREEN.XTERM-256COLOR"] {
+            let mut p = ProtocolState::new();
+            ttype(&mut p, name);
+            assert_eq!(p.var_int(Var::XTERM_256_COLORS), 1, "{name:?}");
+            assert_eq!(p.b256_support, Support::Yes);
+        }
     }
 
     /// What the cycle is for: MTTS only ever arrives on a later response, so
