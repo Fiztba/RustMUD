@@ -975,30 +975,30 @@ pub fn hit(g: &mut Game, chid: CharId, victim: CharId, type_: i32) {
         let t = if type_ == SKILL_BACKSTAB { SKILL_BACKSTAB } else { w_type };
         damage(g, chid, victim, 0, t);
     } else {
-        let mut dam = mud_data::tables::STR_APP[strength_apply_index(g, chid)].1;
-        dam += g.ch(chid).points.damroll as i32;
+        let mut dam = i64::from(mud_data::tables::STR_APP[strength_apply_index(g, chid)].1);
+        dam += i64::from(g.ch(chid).points.damroll);
 
         if let Some(w) = wielded {
             let (n, s) = (g.obj(w).values[1], g.obj(w).values[2]);
-            dam += g.rng.dice(n, s);
+            dam += i64::from(g.rng.dice(n, s));
         } else if g.ch(chid).is_npc() {
             let (n, s) = (g.ch(chid).mob_specials.damnodice as i32, g.ch(chid).mob_specials.damsizedice as i32);
-            dam += g.rng.dice(n, s);
+            dam += i64::from(g.rng.dice(n, s));
         } else {
-            dam += g.rng.rand_number(0, 2);
+            dam += i64::from(g.rng.rand_number(0, 2));
         }
 
         let vpos = g.ch(victim).position as i32;
         if vpos < POS_FIGHTING as i32 {
-            dam *= 1 + (POS_FIGHTING as i32 - vpos) / 3;
+            dam *= i64::from(1 + (POS_FIGHTING as i32 - vpos) / 3);
         }
         dam = dam.max(1);
 
         if type_ == SKILL_BACKSTAB {
             let mult = mud_data::tables::BACKSTAB_MULT[(g.ch(chid).level as usize).min(34)];
-            damage(g, chid, victim, dam * mult, SKILL_BACKSTAB);
+            damage(g, chid, victim, (dam * i64::from(mult)).min(i64::from(i32::MAX)) as i32, SKILL_BACKSTAB);
         } else {
-            damage(g, chid, victim, dam, w_type);
+            damage(g, chid, victim, dam.min(i64::from(i32::MAX)) as i32, w_type);
         }
     }
 
