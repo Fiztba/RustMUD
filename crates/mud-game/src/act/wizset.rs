@@ -633,6 +633,10 @@ pub fn do_set(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd:
             send_to_char(g, chid, b"Can't set that!\r\n");
             false
         }
+        Some(43) if is_file => {
+            send_to_char(g, chid, b"An offline player has no current room; use loadroom to change their login room.\r\n");
+            false
+        }
         Some(m) => perform_set(g, chid, vict, m, &buf),
     };
 
