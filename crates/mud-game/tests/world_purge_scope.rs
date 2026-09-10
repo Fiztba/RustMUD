@@ -62,4 +62,19 @@ fn a_world_purge_requires_permission_for_every_zone_before_changing_anything() {
     mud_game::act::wizard::do_zpurge(g, builder, b"*", 0, 0);
     assert!(ids.iter().all(|&oid| g.try_obj(oid).is_some()), "a rejected world purge must not remove objects in any zone");
     assert!(String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output).contains("own zone"));
+    let own_zone = g.world.zones[0].number;
+    mud_game::act::wizard::do_zpurge(g, builder, own_zone.to_string().as_bytes(), 0, 0);
+    assert!(g.try_obj(ids[0]).is_none()); assert!(g.try_obj(ids[1]).is_some());
+    let other_zone = g.world.zones[g.world.rooms[outside as usize].zone as usize].number;
+    mud_game::act::wizard::do_zpurge(g, builder, other_zone.to_string().as_bytes(), 0, 0);
+    assert!(g.try_obj(ids[1]).is_some());
+    g.ch_mut(builder).level = LVL_GOD;
+    mud_game::act::wizard::do_zpurge(g, builder, b"*", 0, 0);
+    assert!(g.try_obj(ids[1]).is_none());
+    g.ch_mut(builder).level = LVL_BUILDER;
+    g.ch_mut(builder).ps_mut().olc_zone = mud_game::act::wizstat::ALL_PERMISSION;
+    let oid = g.objs.insert(mud_game::obj::create_obj()); mud_game::handler::obj_to_room(g, oid, outside);
+    mud_game::act::wizard::do_zpurge(g, builder, b"*", 0, 0);
+    assert!(g.try_obj(oid).is_none());
 }
+
