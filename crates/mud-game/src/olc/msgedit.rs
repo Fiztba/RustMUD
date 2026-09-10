@@ -148,7 +148,7 @@ fn show_messages(g: &mut Game, chid: CharId) {
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
-pub fn save_messages_to_disk(g: &mut Game) {
+pub fn save_messages_to_disk(g: &mut Game) -> bool {
     let mut out: BStr = Vec::new();
     // The on-disk header. Rebranding it would change the file format, so
     // it stays until that is a deliberate change.
@@ -180,11 +180,14 @@ pub fn save_messages_to_disk(g: &mut Game) {
     }
 
     let path = g.lib_dir.join("misc").join("messages");
-    if std::fs::write(&path, &out).is_err() {
+    let temporary = path.with_extension("tmp");
+    if std::fs::write(&temporary, &out).and_then(|_| std::fs::rename(&temporary, &path)).is_err() {
         // Log and carry on: a failed write here is not worth taking the
         // MUD down for.
         g.log(format!("SYSERR: Error writing combat message file {}", path.display()));
+        return false;
     }
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -545,8 +548,12 @@ pub fn msgedit_parse(
                 // copy back into table order.
                 let mut list = olc.msg_list.as_ref().unwrap().as_ref().clone();
                 list.msg.reverse();
-                g.fight_messages[olc.number as usize] = list;
-                save_messages_to_disk(g);
+                let original = std::mem::replace(&mut g.fight_messages[olc.number as usize], list);
+                if !save_messages_to_disk(g) {
+                    g.fight_messages[olc.number as usize] = original;
+                    write_to_desc(g, di, b"Unable to save messages. Retry saving? Y/N : ");
+                    return Some(olc);
+                }
                 olc.value = 0;
                 write_to_desc(g, di, b"Messages saved.\r\n");
             } else {
@@ -581,6 +588,14 @@ pub fn msgedit_parse(
                     .map(|c| (LVL_IMMORT as i16).max(g.ch(c).invis_lev()) as u8)
                     .unwrap_or(LVL_IMMORT as u8);
                 let a_type = g.fight_messages[olc.number as usize].a_type;
+                // Back to the state every unused slot is already in at
+                // boot: no messages, no attack type, no count.
+                let original = std::mem::take(&mut g.fight_messages[olc.number as usize]);
+                if !save_messages_to_disk(g) {
+                    g.fight_messages[olc.number as usize] = original;
+                    write_to_desc(g, di, b"Unable to save deletion. Retry deleting? Y/N : ");
+                    return Some(olc);
+                }
                 g.mudlog(
                     MudlogKind::Cmp,
                     level,
@@ -590,11 +605,6 @@ pub fn msgedit_parse(
                         name, a_type, olc.number
                     ),
                 );
-                // Back to the state every unused slot is already in at
-                // boot: no messages, no attack type, no count.
-                g.fight_messages[olc.number as usize] =
-                    crate::fight::FightMessageList::default();
-                save_messages_to_disk(g);
                 write_to_desc(g, di, b"Attack type deleted.\r\n");
                 crate::olc::cleanup_olc(g, di, olc, CLEANUP_ALL);
                 return None;
