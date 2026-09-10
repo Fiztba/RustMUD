@@ -230,6 +230,8 @@ pub struct ProtocolState {
     pub vars: Vec<MsdpVal>,
     /// Per-descriptor subneg accumulator (see module doc for the F2 fix).
     iac_buf: Vec<u8>,
+    /// Partial ESC[digit z client tag, retained across socket reads.
+    mxp_buf: Vec<u8>,
     /// An IAC or option command awaiting its next byte from the stream.
     iac_pending: bool,
     option_pending: Option<u8>,
@@ -284,6 +286,7 @@ impl ProtocolState {
             last_ttype: None,
             vars,
             iac_buf: Vec::new(),
+            mxp_buf: Vec::new(),
             iac_pending: false,
             option_pending: None,
             out: Vec::new(),
@@ -435,31 +438,39 @@ pub fn protocol_input(p: &mut ProtocolState, data: &[u8], output_empty: bool) ->
             i += 1;
             continue;
         }
-        if b == 0x1B && i + 2 < data.len() && data[i + 1] == b'[' && data[i + 2].is_ascii_digit() {
-            // Client-side MXP tag: ESC [ <digit> z <tag> >.
-            if i + 3 < data.len() && data[i + 3] == b'z' {
-                let mut j = i + 4;
-                let mut tag = Vec::new();
-                let mut hit_end = false;
-                while j < data.len() && tag.len() < 1000 {
-                    if data[j] == b'>' {
-                        hit_end = true;
-                        break;
-                    }
-                    tag.push(data[j]);
-                    j += 1;
+        if !p.mxp_buf.is_empty() {
+            let len = p.mxp_buf.len();
+            if len >= 4 {
+                if b == b'>' {
+                    let tag = std::mem::take(&mut p.mxp_buf);
+                    parse_client_mxp_tag(p, &tag[4..], output_empty);
+                } else if len >= 1004 {
+                    r.bugs.push("MXP client tag exceeds 1000 bytes.".to_string());
+                    r.fatal = true;
+                    return r;
+                } else {
+                    p.mxp_buf.push(b);
                 }
-                if hit_end {
-                    parse_client_mxp_tag(p, &tag, output_empty);
-                    i = j + 1;
-                    continue;
-                }
-                // No terminator in this read: drop the ESC and continue —
-                // a tag fragmented across reads cannot be recovered.
                 i += 1;
                 continue;
             }
-            r.in_band.push(b);
+            let matches_prefix = match len {
+                1 => b == b'[',
+                2 => b.is_ascii_digit(),
+                3 => b == b'z',
+                _ => unreachable!(),
+            };
+            if matches_prefix {
+                p.mxp_buf.push(b);
+                i += 1;
+                continue;
+            }
+            // An ordinary escape sequence belongs to command input. Process
+            // this byte again so an adjacent ESC can start a fresh candidate.
+            r.in_band.append(&mut p.mxp_buf);
+        }
+        if b == 0x1B {
+            p.mxp_buf.push(b);
             i += 1;
             continue;
         }
@@ -1571,6 +1582,20 @@ mod tests {
         }
         assert!(protocol_input(&mut p, &[IAC, IAC], true).fatal);
         assert_eq!(p.iac_buf.len(), mud_data::types::MAX_RAW_INPUT_LENGTH);
+    }
+
+    #[test]
+    fn mxp_client_tags_survive_every_read_boundary() {
+        let wire = b"look\n\x1b[1z<VERSION CLIENT=MUSHCLIENT VERSION=5.06 MXP=1.0>say hi\n";
+        for split in 0..=wire.len() {
+            let mut p = ProtocolState::new();
+            let mut input = protocol_input(&mut p, &wire[..split], true).in_band;
+            input.extend(protocol_input(&mut p, &wire[split..], true).in_band);
+            assert_eq!(input, b"look\nsay hi\n", "split {split}");
+            assert_eq!(p.var_str(Var::CLIENT_ID), b"MUSHCLIENT", "split {split}");
+            assert_eq!(p.var_str(Var::CLIENT_VERSION), b"5.06");
+            assert_eq!(p.mxp_version, b"1.0");
+        }
     }
 
     #[test]
