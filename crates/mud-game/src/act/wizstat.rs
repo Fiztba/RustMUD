@@ -876,7 +876,7 @@ pub fn do_stat_character(g: &mut Game, chid: CharId, k: CharId) {
             "Gold: [{:9}], Bank: [{:9}] (Total: {}), ",
             p.gold,
             p.bank_gold,
-            p.gold + p.bank_gold
+            i64::from(p.gold) + i64::from(p.bank_gold)
         )
         .as_bytes(),
     );

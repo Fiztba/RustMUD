@@ -323,14 +323,28 @@ pub fn crash_rentsave(g: &mut Game, chid: CharId, cost: i32) {
     write_objs_file(g, &path, &out);
 }
 
-/// Crash_cryosave. The fee comes out of carried gold
-/// only — the bank counted toward affordability but is never debited
-/// (study doc 04 §7.7).
+/// Charge carried gold first, then the bank, without partially paying an unaffordable bill.
+fn charge_rent(g: &mut Game, chid: CharId, cost: i64) -> bool {
+    let p = &mut g.ch_mut(chid).points;
+    let gold = i64::from(p.gold);
+    let bank = i64::from(p.bank_gold);
+    if cost < 0 || cost > gold + bank {
+        return false;
+    }
+    p.gold = (gold - cost).max(0) as i32;
+    p.bank_gold = (bank - (cost - gold).max(0)) as i32;
+    true
+}
+
+/// Save cryogenic storage after charging the full fee.
 pub fn crash_cryosave(g: &mut Game, chid: CharId, cost: i32) {
     if g.ch(chid).is_npc() {
         return;
     }
     let Some(path) = objs_path(g, chid) else { return };
+    if !charge_rent(g, chid, i64::from(cost)) {
+        return;
+    }
     crash_extract_norent_eq(g, chid);
     let carrying = g.ch(chid).carrying.clone();
     for oid in carrying {
@@ -338,8 +352,6 @@ pub fn crash_cryosave(g: &mut Game, chid: CharId, cost: i32) {
             crash_extract_norents(g, oid);
         }
     }
-    let gold = g.ch(chid).points.gold;
-    g.ch_mut(chid).points.gold = (gold - cost).max(0);
 
     let mut out = write_rentcode(g, chid, RENT_CRYO, 0);
     save_body(g, chid, &mut out, true);
@@ -379,7 +391,10 @@ pub fn crash_idlesave(g: &mut Game, chid: CharId) {
     cost += cost_eq;
     cost *= 2; // forcerent costs twice normal rent
 
-    let purse = |g: &Game| g.ch(chid).points.gold + g.ch(chid).points.bank_gold;
+    let purse = |g: &Game| {
+        let p = &g.ch(chid).points;
+        (i64::from(p.gold) + i64::from(p.bank_gold)).min(i64::from(i32::MAX))
+    };
     if cost > purse(g) {
         for j in 0..NUM_WEARS {
             if g.ch(chid).equipment[j].is_some() {
@@ -407,7 +422,7 @@ pub fn crash_idlesave(g: &mut Game, chid: CharId) {
         return;
     }
 
-    let mut out = write_rentcode(g, chid, RENT_TIMEDOUT, cost);
+    let mut out = write_rentcode(g, chid, RENT_TIMEDOUT, cost as i32);
     save_body(g, chid, &mut out, true);
     write_objs_file(g, &path, &out);
 }
@@ -509,9 +524,9 @@ fn crash_extract_expensive(g: &mut Game, chid: CharId) {
     extract_obj(g, max);
 }
 
-fn crash_calculate_rent(g: &Game, oid: ObjId, cost: &mut i32) {
+fn crash_calculate_rent(g: &Game, oid: ObjId, cost: &mut i64) {
     let o = g.obj(oid);
-    *cost += o.cost_per_day.max(0);
+    *cost += i64::from(o.cost_per_day.max(0));
     let contents = o.contains.clone();
     for c in contents {
         if g.try_obj(c).is_some() {
@@ -904,14 +919,9 @@ pub fn crash_load(g: &mut Game, chid: CharId) -> i32 {
     }
 
     if rentcode == RENT_RENTED || rentcode == RENT_TIMEDOUT {
-        // (int)((float)(now - timed) / SECS_PER_REAL_DAY) — truncating.
-        let num_of_days = ((g.now - timed) as f32 / SECS_PER_REAL_DAY as f32) as i32;
-        let cost = netcost * num_of_days;
-        let (gold, bank) = {
-            let p = &g.ch(chid).points;
-            (p.gold, p.bank_gold)
-        };
-        if cost > gold + bank {
+        let num_of_days = g.now.saturating_sub(timed).max(0) / SECS_PER_REAL_DAY;
+        let cost = i64::from(netcost.max(0)).saturating_mul(num_of_days);
+        if !charge_rent(g, chid, cost) {
             g.mudlog(
                 MudlogKind::Brf,
                 imm_lvl,
@@ -921,8 +931,6 @@ pub fn crash_load(g: &mut Game, chid: CharId) -> i32 {
             crash_crashsave(g, chid);
             return 2;
         }
-        g.ch_mut(chid).points.bank_gold = bank - (cost - gold).max(0);
-        g.ch_mut(chid).points.gold = (gold - cost).max(0);
         crate::players_glue::save_char(g, chid);
     }
 
@@ -1030,7 +1038,7 @@ fn crash_rent_deadline(g: &mut Game, chid: CharId, recep: CharId, cost: i32) {
         return;
     }
     let p = &g.ch(chid).points;
-    let days = (p.gold + p.bank_gold) / cost;
+    let days = (i64::from(p.gold) + i64::from(p.bank_gold)) / i64::from(cost);
     let msg = format!(
         "$n tells you, 'You can rent for {} day{} with the gold you have\r\non hand and in the bank.'\r\n",
         days,
@@ -1078,8 +1086,8 @@ fn report_rent(
         }
         if !crash_is_unrentable(g, oid) {
             *nitems += 1;
-            let rent = g.obj(oid).cost_per_day * factor;
-            *cost += rent.max(0) as i64;
+            let rent = i64::from(g.obj(oid).cost_per_day) * i64::from(factor);
+            *cost += rent.max(0);
             if display {
                 let short = objs_vis(g, oid, chid);
                 let mut msg = format!("$n tells you, '{:5} coins for ", rent).into_bytes();
@@ -1106,7 +1114,7 @@ fn crash_offer_rent(g: &mut Game, chid: CharId, recep: CharId, display: bool, fa
         return 0;
     }
 
-    let mut totalcost = (g.config.min_rent_cost * factor) as i64;
+    let mut totalcost = i64::from(g.config.min_rent_cost) * i64::from(factor);
     let mut numitems = 0i64;
     let carrying = g.ch(chid).carrying.clone();
     report_rent(g, chid, recep, &carrying, &mut totalcost, &mut numitems, display, factor);
@@ -1136,9 +1144,14 @@ fn crash_offer_rent(g: &mut Game, chid: CharId, recep: CharId, display: bool, fa
         act(g, msg.as_bytes(), false, Some(recep), None, Some(chid), TO_VICT);
         return 0;
     }
+    if !(0..=i64::from(i32::MAX)).contains(&totalcost) {
+        act(g, b"$n tells you, 'That rent bill is too large. Store fewer items.'",
+            false, Some(recep), None, Some(chid), TO_VICT);
+        return 0;
+    }
     if display {
         let msg =
-            format!("$n tells you, 'Plus, my {} coin fee..'", g.config.min_rent_cost * factor);
+            format!("$n tells you, 'Plus, my {} coin fee..'", i64::from(g.config.min_rent_cost) * i64::from(factor));
         act(g, msg.as_bytes(), false, Some(recep), None, Some(chid), TO_VICT);
         let msg = format!(
             "$n tells you, 'For a total of {} coins{}.'",
@@ -1147,7 +1160,7 @@ fn crash_offer_rent(g: &mut Game, chid: CharId, recep: CharId, display: bool, fa
         );
         act(g, msg.as_bytes(), false, Some(recep), None, Some(chid), TO_VICT);
         let p = &g.ch(chid).points;
-        if totalcost > (p.gold + p.bank_gold) as i64 {
+        if totalcost > (i64::from(p.gold) + i64::from(p.bank_gold)) {
             act(
                 g,
                 b"$n tells you, '...which I see you can't afford.'",
@@ -1242,7 +1255,7 @@ pub fn gen_receptionist(
             let p = &g.ch(chid).points;
             (p.gold, p.bank_gold)
         };
-        if cost > gold + bank {
+        if i64::from(cost) > i64::from(gold) + i64::from(bank) {
             act(
                 g,
                 b"$n tells you, '...which I see you can't afford.'",
@@ -1272,7 +1285,7 @@ pub fn gen_receptionist(
                 TO_VICT,
             );
             crash_rentsave(g, chid, cost);
-            let purse = g.ch(chid).points.gold + g.ch(chid).points.bank_gold;
+            let purse = i64::from(g.ch(chid).points.gold) + i64::from(g.ch(chid).points.bank_gold);
             g.mudlog(
                 MudlogKind::Nrm,
                 imm_lvl,
