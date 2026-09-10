@@ -154,6 +154,11 @@ pub fn do_oasis_cedit(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, 
     }
 
     if buf1.is_empty() {
+        if g.descriptors.order.iter().any(|&other|
+            g.descriptors.get(other).is_some_and(|d| d.state == ConState::Cedit)) {
+            send_to_char(g, chid, b"The game configuration is already being edited.\r\n");
+            return;
+        }
         let mut olc = Box::new(OlcData::default());
         olc.zone_num = 0;
         cedit_setup(g, di, &mut olc);
