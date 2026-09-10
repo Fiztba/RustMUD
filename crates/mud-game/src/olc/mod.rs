@@ -537,6 +537,20 @@ pub(crate) fn save_failed(what: &str) -> Vec<u8> {
         .into_bytes()
 }
 
+/// Write `bytes` to `path` by way of a `.tmp` sibling that is renamed over
+/// the target once it is whole, so a write that fails part-way (disk full,
+/// I/O error) leaves the original file untouched rather than truncated.
+/// The temporary file is removed on failure.
+pub(crate) fn write_replacing(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let temporary = path.with_extension("tmp");
+    let result = std::fs::write(&temporary, bytes)
+        .and_then(|()| std::fs::rename(&temporary, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
 /// An empty or absent string becomes "undefined".
 pub fn str_udup(s: &[u8]) -> BStr {
     if s.is_empty() {

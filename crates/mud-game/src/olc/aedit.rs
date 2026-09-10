@@ -276,7 +276,7 @@ pub fn aedit_save_to_disk(g: &mut Game) -> bool {
     out.extend_from_slice(b"$\n");
 
     let path = g.lib_dir.join("misc").join("socials.new");
-    if std::fs::write(&path, &out).is_err() {
+    if crate::olc::write_replacing(&path, &out).is_err() {
         // Log and carry on: a failed write here is not worth taking the
         // MUD down for.
         g.log(format!("SYSERR: Can't open socials file '{}'", path.display()));

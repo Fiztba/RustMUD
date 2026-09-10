@@ -189,7 +189,7 @@ pub fn tedit_string_cleanup(
         let terminal_text = text.unwrap_or_default();
         let mut body = terminal_text.clone();
         body.retain(|&b| b != b'\r');
-        if std::fs::write(&path, &body).is_err() {
+        if crate::olc::write_replacing(&path, &body).is_err() {
             let msg = format!("SYSERR: Can't write file '{}'.", path.display());
             g.mudlog(MudlogKind::Cmp, LVL_IMPL, true, &msg);
         } else {

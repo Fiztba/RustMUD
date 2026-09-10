@@ -180,8 +180,7 @@ pub fn save_messages_to_disk(g: &mut Game) -> bool {
     }
 
     let path = g.lib_dir.join("misc").join("messages");
-    let temporary = path.with_extension("tmp");
-    if std::fs::write(&temporary, &out).and_then(|_| std::fs::rename(&temporary, &path)).is_err() {
+    if crate::olc::write_replacing(&path, &out).is_err() {
         // Log and carry on: a failed write here is not worth taking the
         // MUD down for.
         g.log(format!("SYSERR: Error writing combat message file {}", path.display()));
