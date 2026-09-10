@@ -49,14 +49,15 @@ fn descriptor(g: &mut Game, ch: mud_data::ids::CharId, state: ConState) -> usize
 
 use mud_data::flags;
 use mud_game::{dg::{self, GoId}, handler::*};
-fn put_case(redirect: bool, close: bool) {
-    let mut f = fixture(&format!("{redirect}-{close}")); let g = &mut f.game;
+fn put_case(redirect: bool, close: bool, carried: bool) {
+    let mut f = fixture(&format!("{redirect}-{close}-{carried}")); let g = &mut f.game;
     let actor = player(g, b"Actor", 12345); g.character_list.push_back(actor);
     char_to_room(g, actor, 1); g.rooms[1].light = 1; descriptor(g, actor, ConState::Playing);
     g.world.rooms[2].room_flags = [0;4];
     let mut chest = mud_game::obj::create_obj(); chest.name = Some(b"chest".to_vec());
     chest.type_flag = flags::ITEM_CONTAINER; chest.values[1] = flags::CONT_CLOSEABLE;
-    let chest = g.objs.insert(chest); obj_to_room(g, chest, 1);
+    let chest = g.objs.insert(chest);
+    if carried { obj_to_char(g, chest, actor); } else { obj_to_room(g, chest, 1); }
     let mut items = vec![];
     for _ in 0..2 {
         let mut obj = mud_game::obj::create_obj(); obj.name = Some(b"gem".to_vec());
@@ -82,6 +83,8 @@ fn put_case(redirect: bool, close: bool) {
         else { assert_eq!(g.obj(item).in_obj, Some(chest)); }
     }
 }
-#[test] fn redirected_actor_does_not_put_items_in_remote_container() { put_case(true, false); }
-#[test] fn closed_container_does_not_receive_items_after_trigger() { put_case(false, true); }
-#[test] fn unchanged_container_receives_all_items() { put_case(false, false); }
+#[test] fn redirected_actor_does_not_put_items_in_remote_container() { put_case(true, false, false); }
+#[test] fn closed_container_does_not_receive_items_after_trigger() { put_case(false, true, false); }
+#[test] fn unchanged_container_receives_all_items() { put_case(false, false, false); }
+
+#[test] fn carried_container_receives_all_items() { put_case(false, false, true); }
