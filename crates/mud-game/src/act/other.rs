@@ -323,8 +323,10 @@ pub fn do_steal(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcm
             act(g, b"$n tries to steal gold from $N.", true, Some(chid), None, Some(vict), comm::TO_NOTVICT);
         } else {
             // Steal some gold coins.
-            let mut gold = (g.ch(vict).points.gold * g.rng.rand_number(1, 10)) / 100;
-            gold = gold.min(1782);
+            let available = i64::from(g.ch(vict).points.gold.max(0));
+            let capacity = i64::from(MAX_GOLD) - i64::from(g.ch(chid).points.gold);
+            let gold = ((available * i64::from(g.rng.rand_number(1, 10))) / 100)
+                .min(1782).min(capacity.max(0)) as i32;
             if gold > 0 {
                 crate::limits::increase_gold(g, chid, gold);
                 crate::limits::decrease_gold(g, vict, gold);
