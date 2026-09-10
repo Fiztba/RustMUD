@@ -30,12 +30,16 @@ fn main() -> ExitCode {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--out" => {
-                out_dir = Some(PathBuf::from(&args[i + 1]));
-                i += 2;
-            }
-            "--reference" => {
-                reference_dir = Some(PathBuf::from(&args[i + 1]));
+            "--out" | "--reference" => {
+                let Some(value) = args.get(i + 1) else {
+                    eprintln!("{} requires a directory", args[i]);
+                    return ExitCode::from(2);
+                };
+                if args[i] == "--out" {
+                    out_dir = Some(PathBuf::from(value));
+                } else {
+                    reference_dir = Some(PathBuf::from(value));
+                }
                 i += 2;
             }
             other => {
