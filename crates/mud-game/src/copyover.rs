@@ -208,6 +208,8 @@ pub fn do_copyover(g: &mut Game, chid: CharId, _argument: &[u8], _cmd: usize, _s
         crate::comm::write_direct(g, di, notice.as_bytes());
     }
 
+    // The successor reloads houses from disk just like a normal boot.
+    crate::house::house_save_all(g);
     g.copyover = Some(plan);
 }
 
