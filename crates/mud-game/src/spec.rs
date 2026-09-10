@@ -585,6 +585,10 @@ fn bank(g: &mut Game, chid: CharId, cmd: usize, arg: &[u8]) -> bool {
             send_to_char(g, chid, b"You don't have that many coins!\r\n");
             return true;
         }
+        if amount > MAX_BANK.saturating_sub(g.ch(chid).points.bank_gold) {
+            send_to_char(g, chid, b"That deposit would exceed your maximum bank balance.\r\n");
+            return true;
+        }
         decrease_gold(g, chid, amount);
         increase_bank(g, chid, amount);
         send_to_char(g, chid, format!("You deposit {} coins.\r\n", amount).as_bytes());
@@ -598,6 +602,10 @@ fn bank(g: &mut Game, chid: CharId, cmd: usize, arg: &[u8]) -> bool {
         }
         if g.ch(chid).points.bank_gold < amount {
             send_to_char(g, chid, b"You don't have that many coins deposited!\r\n");
+            return true;
+        }
+        if amount > MAX_GOLD.saturating_sub(g.ch(chid).points.gold) {
+            send_to_char(g, chid, b"You cannot carry that many gold coins.\r\n");
             return true;
         }
         increase_gold(g, chid, amount);
