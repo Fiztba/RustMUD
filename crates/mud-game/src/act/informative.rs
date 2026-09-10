@@ -13,7 +13,7 @@ use crate::comm::{self, act, cc, send_to_char, C_NRM, C_SPR, KCYN, KGRN, KNRM, K
 use crate::game::{Game, MudlogKind};
 use crate::gametime::{age, real_time_passed_hours_days};
 use crate::handler::{
-    can_see, can_see_obj, fname, get_char_room_vis, get_number, get_obj_in_list_vis, isname, obj_action_desc,
+    can_see, can_see_obj, fname, get_char_room_vis, get_number, isname, obj_action_desc,
     obj_name, obj_room_desc, obj_short, pers, room_is_dark,
 };
 use crate::interpreter::{any_one_arg, half_chop, is_abbrev_ci, one_argument, Handler};
@@ -689,7 +689,7 @@ fn look_at_target(g: &mut Game, chid: CharId, arg: &[u8]) {
     let room = g.ch(chid).in_room;
 
     // An object in inv/room/eq the arg might name (for modifier suffix).
-    let found_obj = find_obj_for_look(g, chid, &stripped);
+    let found_obj = find_obj_for_look(g, chid, arg);
 
     // Room extra descriptions.
     let room_ex = g.world.rooms[room as usize].ex_descriptions.clone();
@@ -737,22 +737,7 @@ fn look_at_target(g: &mut Game, chid: CharId, arg: &[u8]) {
 }
 
 fn find_obj_for_look(g: &Game, chid: CharId, name: &[u8]) -> Option<ObjId> {
-    let carrying = &g.ch(chid).carrying;
-    if let Some(o) = get_obj_in_list_vis(g, chid, name, None, carrying) {
-        return Some(o);
-    }
-    let room = g.ch(chid).in_room;
-    if let Some(o) = get_obj_in_list_vis(g, chid, name, None, &g.rooms[room as usize].contents) {
-        return Some(o);
-    }
-    for pos in 0..NUM_WEARS {
-        if let Some(oid) = g.ch(chid).equipment[pos] {
-            if can_see_obj(g, chid, oid) && isname(name, obj_name(g, oid)) {
-                return Some(oid);
-            }
-        }
-    }
-    None
+    generic_find_obj(g, chid, name).map(|(oid, _)| oid)
 }
 
 fn exdesc_of_obj(g: &Game, oid: ObjId, word: &[u8], fnum: &mut i32) -> Option<BStr> {
@@ -894,44 +879,49 @@ enum FoundWhere {
 }
 
 fn generic_find_obj(g: &Game, chid: CharId, arg: &[u8]) -> Option<(ObjId, FoundWhere)> {
+    let (mut number, name) = get_number(arg);
+    if number == 0 { return None; }
     let carrying = &g.ch(chid).carrying;
-    if let Some(o) = get_obj_in_list_vis(g, chid, arg, None, carrying) {
+    if let Some(o) = crate::handler::get_obj_in_list_vis_counted(g, chid, &name, &mut number, carrying) {
         return Some((o, FoundWhere::Inventory));
     }
     let room = g.ch(chid).in_room;
-    if let Some(o) = get_obj_in_list_vis(g, chid, arg, None, &g.rooms[room as usize].contents) {
-        return Some((o, FoundWhere::Room));
-    }
-    let (_, name) = get_number(arg);
-    for pos in 0..NUM_WEARS {
-        if let Some(oid) = g.ch(chid).equipment[pos] {
-            if can_see_obj(g, chid, oid) && isname(&name, obj_name(g, oid)) {
-                return Some((oid, FoundWhere::Equipment));
-            }
+    if room != NOWHERE {
+        if let Some(o) = crate::handler::get_obj_in_list_vis_counted(g, chid, &name, &mut number, &g.rooms[room as usize].contents) {
+            return Some((o, FoundWhere::Room));
         }
     }
-    None
+    let pos = crate::handler::get_obj_pos_in_equip_vis_counted(g, chid, &name, &mut number)?;
+    Some((g.ch(chid).equipment[pos]?, FoundWhere::Equipment))
+}
+
+fn can_inspect(g: &mut Game, chid: CharId) -> bool {
+    if g.ch(chid).desc.is_none() {
+        return false;
+    }
+    if g.ch(chid).position < POS_SLEEPING {
+        send_to_char(g, chid, b"You can't see anything but stars!\r\n");
+        return false;
+    }
+    if g.ch(chid).aff(flags::AFF_BLIND) && g.ch(chid).level < LVL_IMMORT {
+        send_to_char(g, chid, b"You can't see a damned thing, you're blind!\r\n");
+        return false;
+    }
+    let room = g.ch(chid).in_room;
+    if room == NOWHERE { return false; }
+    if room_is_dark(g, room) && !can_see_in_dark(g, chid) {
+        send_to_char(g, chid, b"It is pitch black...\r\n");
+        list_char_to_char(g, chid); // glowing red eyes
+        return false;
+    }
+
+    true
 }
 
 pub fn do_look(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd: i32) {
     use crate::interpreter::SCMD_READ;
-    if g.ch(chid).desc.is_none() {
-        return;
-    }
-    if g.ch(chid).position < POS_SLEEPING {
-        send_to_char(g, chid, b"You can't see anything but stars!\r\n");
-        return;
-    }
-    if g.ch(chid).aff(flags::AFF_BLIND) && g.ch(chid).level < LVL_IMMORT {
-        send_to_char(g, chid, b"You can't see a damned thing, you're blind!\r\n");
-        return;
-    }
+    if !can_inspect(g, chid) { return; }
     let room = g.ch(chid).in_room;
-    if room_is_dark(g, room) && !can_see_in_dark(g, chid) {
-        send_to_char(g, chid, b"It is pitch black...\r\n");
-        list_char_to_char(g, chid); // glowing red eyes
-        return;
-    }
 
     let (arg, rest) = any_one_arg(argument);
     let (arg2, _) = one_argument(rest);
@@ -988,6 +978,7 @@ pub fn search_block(arg: &[u8], list: &[&str]) -> Option<usize> {
 }
 
 pub fn do_examine(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd: i32) {
+    if !can_inspect(g, chid) { return; }
     let (arg, _) = one_argument(argument);
     if arg.is_empty() {
         send_to_char(g, chid, b"Examine what?\r\n");
@@ -1461,7 +1452,7 @@ fn find_sub(haystack: &[u8], needle: &[u8]) -> bool {
 
 pub fn do_who(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd: i32) {
     const WHO_FORMAT: &[u8] =
-        b"Usage: who [minlev[-maxlev]] [-n name] [-c classlist] [-k] [-l] [-n] [-q] [-r] [-s] [-z]\r\n";
+        b"Usage: who [minlev[-maxlev]] [-n name] [-c classlist] [-g] [-k] [-l] [-q] [-r] [-s] [-z]\r\n";
     let mut buf = crate::interpreter::skip_spaces(argument).to_vec();
     let mut name_search: BStr = Vec::new();
     let (mut low, mut high) = (0i32, LVL_IMPL as i32);
@@ -1469,7 +1460,6 @@ pub fn do_who(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd:
         (false, false, false, false, false);
     let mut showclass: i32 = 0;
     let (mut showgroup, mut showleader) = (false, false);
-    let _ = (showgroup, showleader);
 
     while !buf.is_empty() {
         let (arg, rest) = half_chop(&buf);
@@ -1592,10 +1582,9 @@ pub fn do_who(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd:
         if showclass != 0 && showclass & (1 << t.class) == 0 {
             return false;
         }
-        // Group filters are stage 5; with no group system, -l/-g match nobody.
-        if showgroup || showleader {
-            return false;
-        }
+        let group = g.group_of(tch);
+        if showgroup && group.is_none() { return false; }
+        if showleader && !group.is_some_and(|group| group.leader == Some(tch)) { return false; }
         true
     };
 
@@ -3137,26 +3126,17 @@ pub fn do_areas(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcm
             continue;
         }
         let (min, max) = (g.world.zones[i].min_level, g.world.zones[i].max_level);
-        let mut overlap = false;
+        let zone_low = min.max(0);
+        let zone_high = if max < 0 { i32::MAX } else { max };
         let show = if lolev == -1 {
             true
-        } else if hilev == -1 && lolev >= min && lolev <= max {
-            true
-        } else if hilev != -1 && lolev >= min && hilev <= max {
-            true
-        } else if hilev != -1
-            && ((lolev >= min && lolev <= max) || (hilev <= max && hilev >= min))
-        {
-            overlap = true;
-            true
-        } else if max < 0 && lolev >= min {
-            true
-        } else if max < 0 && hilev >= min {
-            overlap = true;
-            true
+        } else if hilev == -1 {
+            (zone_low..=zone_high).contains(&lolev)
         } else {
-            false
+            lolev <= zone_high && hilev >= zone_low
         };
+        let overlap = show && hilev != -1 && (min >= 0 || max >= 0)
+            && (zone_low < lolev || zone_high > hilev);
         if !show {
             continue;
         }
