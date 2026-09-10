@@ -1081,15 +1081,15 @@ pub fn sedit_parse(
         SEDIT_CLOSE1 => olc.shop.as_mut().unwrap().close1 = limit(atoi(arg), 0, 28),
         SEDIT_CLOSE2 => olc.shop.as_mut().unwrap().close2 = limit(atoi(arg), 0, 28),
 
-        SEDIT_BUY_PROFIT => {
-            // Nothing parseable leaves the field untouched.
-            if let Some(v) = scan_f32(arg) {
-                olc.shop.as_mut().unwrap().profit_buy = v;
-            }
-        }
-        SEDIT_SELL_PROFIT => {
-            if let Some(v) = scan_f32(arg) {
-                olc.shop.as_mut().unwrap().profit_sell = v;
+        SEDIT_BUY_PROFIT | SEDIT_SELL_PROFIT => {
+            let Some(value) = scan_f32(arg).filter(|v| v.is_finite() && *v >= 0.0) else {
+                write_to_desc(g, di, b"Enter a finite, non-negative profit multiplier: ");
+                return Some(olc);
+            };
+            if olc.mode == SEDIT_BUY_PROFIT {
+                olc.shop.as_mut().unwrap().profit_buy = value;
+            } else {
+                olc.shop.as_mut().unwrap().profit_sell = value;
             }
         }
 
