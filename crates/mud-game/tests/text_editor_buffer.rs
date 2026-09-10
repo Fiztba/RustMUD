@@ -69,3 +69,33 @@ fn abort_does_not_restore_a_stale_shared_buffer() {
     mud_game::olc::tedit::tedit_string_cleanup(g, di, olc, Some(b"Old content\r\n".to_vec()), false);
     assert_eq!(g.texts.news, b"New content\r\n");
 }
+
+#[test]
+fn same_file_is_excluded_but_other_files_remain_editable() {
+    let mut f = fixture("parallel"); let g = &mut f.game;
+    let first = player(g, b"First", 12345); let second = player(g, b"Second", 12346);
+    g.ch_mut(first).level = LVL_IMPL; g.ch_mut(second).level = LVL_IMPL;
+    let a = descriptor(g, first, ConState::Playing); let b = descriptor(g, second, ConState::Playing);
+    mud_game::olc::tedit::do_tedit(g, first, b"news", 0, 0);
+    mud_game::olc::tedit::do_tedit(g, second, b"news", 0, 0);
+    assert_eq!(g.descriptors.get(b).unwrap().state, ConState::Playing);
+    assert!(!g.olc.contains_key(&b));
+    mud_game::olc::tedit::do_tedit(g, second, b"motd", 0, 0);
+    assert_eq!(g.descriptors.get(b).unwrap().state, ConState::Tedit);
+    let olc = g.olc.remove(&a).unwrap();
+    mud_game::olc::tedit::tedit_string_cleanup(g, a, olc, None, false);
+    mud_game::olc::tedit::do_tedit(g, first, b"news", 0, 0);
+    assert_eq!(g.descriptors.get(a).unwrap().state, ConState::Tedit);
+}
+#[test]
+fn failed_write_keeps_the_current_terminal_buffer() {
+    let mut f = fixture("failure"); let g = &mut f.game;
+    let actor = player(g, b"Admin", 12345); g.ch_mut(actor).level = LVL_IMPL;
+    let di = descriptor(g, actor, ConState::Playing);
+    mud_game::olc::tedit::do_tedit(g, actor, b"news", 0, 0);
+    let mut olc = g.olc.remove(&di).unwrap();
+    olc.storage = Some(g.lib_dir.to_string_lossy().as_bytes().to_vec());
+    let original = g.texts.news.clone();
+    mud_game::olc::tedit::tedit_string_cleanup(g, di, olc, Some(b"Replacement\r\n".to_vec()), true);
+    assert_eq!(g.texts.news, original);
+}
