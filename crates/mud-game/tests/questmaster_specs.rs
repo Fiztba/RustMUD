@@ -56,3 +56,38 @@ fn moving_a_quest_restores_the_old_master_and_uses_the_new_masters_job() {
     assert_eq!(g.quest_secondary[0], None);
     delete_quest(g, 0); assert_eq!(g.mob_specs[1], None);
 }
+
+#[test]
+fn boot_assignment_and_reordered_edits_keep_each_masters_own_job() {
+    let mut f = fixture("boot"); let g = &mut f.game;
+    g.world.quests.clear(); g.quest_secondary.clear();
+    let a = g.world.mob_protos[0].vnum as i32; let b = g.world.mob_protos[1].vnum as i32;
+    g.mob_specs[0] = Some(MobSpec::Postmaster); g.mob_specs[1] = Some(MobSpec::Receptionist);
+    for (vnum, master) in [(60000, a), (60001, a), (60002, b)] {
+        g.world.quests.push(Quest { vnum, qm_vnum: master, ..Default::default() });
+        g.quest_secondary.push(None);
+    }
+    mud_game::quest::assign_the_quests(g);
+    assert_eq!(g.quest_secondary, [Some(MobSpec::Postmaster), Some(MobSpec::Postmaster), Some(MobSpec::Receptionist)]);
+    mud_game::quest::assign_the_quests(g);
+    let mut edited = g.world.quests[0].clone(); edited.qm_vnum = b;
+    add_quest(g, &edited, Some(MobSpec::Postmaster));
+    assert_eq!(g.quest_secondary, [Some(MobSpec::Receptionist), Some(MobSpec::Postmaster), Some(MobSpec::Receptionist)]);
+    assert_eq!(g.mob_specs[0], Some(MobSpec::QuestMaster));
+    add_quest(g, &Quest { vnum: 59999, qm_vnum: b, ..Default::default() }, Some(MobSpec::Mayor));
+    assert_eq!(g.quest_secondary[0], Some(MobSpec::Receptionist));
+    let current = g.world.quests[0].clone(); add_quest(g, &current, None);
+    assert_eq!(g.quest_secondary[0], Some(MobSpec::Receptionist));
+    for vnum in [60002, 59999, 60000, 60001] {
+        let rnum = mud_game::quest::real_quest(g, vnum).unwrap(); assert!(delete_quest(g, rnum));
+    }
+    assert_eq!(g.mob_specs[0], Some(MobSpec::Postmaster));
+    assert_eq!(g.mob_specs[1], Some(MobSpec::Receptionist));
+    assert!(!delete_quest(g, 0));
+    for master in [-1, 65535, i32::MAX] {
+        add_quest(g, &Quest { vnum: 60000, qm_vnum: master, ..Default::default() }, Some(MobSpec::Mayor));
+        delete_quest(g, 0);
+        assert_eq!(g.mob_specs[0], Some(MobSpec::Postmaster));
+        assert_eq!(g.mob_specs[1], Some(MobSpec::Receptionist));
+    }
+}
