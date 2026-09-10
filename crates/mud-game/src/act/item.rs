@@ -159,6 +159,9 @@ pub fn do_put(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd:
             }
             // Walks the contents chain from each found object; the
             // countdown decrements only for objects actually put.
+            // get_number() strips the "2." prefix in place in C, so the
+            // follow-ups look for the next consecutive match.
+            let (_, bare) = get_number(&theobj_name);
             let mut howmany = howmany;
             let mut obj = Some(first);
             while let Some(o) = obj {
@@ -171,7 +174,7 @@ pub fn do_put(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd:
                     howmany -= 1;
                     perform_put(g, chid, o, cont);
                 }
-                obj = get_obj_in_list_vis(g, chid, &theobj_name, None, &list_after);
+                obj = get_obj_in_list_vis(g, chid, &bare, Some(1), &list_after);
             }
         } else {
             let mut found = false;
@@ -313,6 +316,7 @@ fn get_from_container(g: &mut Game, chid: CharId, cont: ObjId, arg: &[u8], mode:
             act(g, &buf, false, Some(chid), Some(cont), None, comm::TO_CHAR);
             return;
         };
+        let (_, bare) = get_number(&name);
         let mut obj = Some(first);
         while let Some(o) = obj {
             if howmany == 0 {
@@ -321,7 +325,7 @@ fn get_from_container(g: &mut Game, chid: CharId, cont: ObjId, arg: &[u8], mode:
             howmany -= 1;
             let list_after = contains_after(g, cont, o);
             perform_get_from_container(g, chid, o, cont, mode);
-            obj = get_obj_in_list_vis(g, chid, &name, None, &list_after);
+            obj = get_obj_in_list_vis(g, chid, &bare, Some(1), &list_after);
         }
     } else {
         if obj_dotmode == FIND_ALLDOT && name.is_empty() {
@@ -397,6 +401,7 @@ fn get_from_room(g: &mut Game, chid: CharId, arg: &[u8], mut howmany: i32) {
             send_to_char(g, chid, &msg);
             return;
         };
+        let (_, bare) = get_number(&name);
         let mut obj = Some(first);
         while let Some(o) = obj {
             if howmany == 0 {
@@ -405,7 +410,7 @@ fn get_from_room(g: &mut Game, chid: CharId, arg: &[u8], mut howmany: i32) {
             howmany -= 1;
             let list_after = room_contents_after(g, room, o);
             perform_get_from_room(g, chid, o);
-            obj = get_obj_in_list_vis(g, chid, &name, None, &list_after);
+            obj = get_obj_in_list_vis(g, chid, &bare, Some(1), &list_after);
         }
     } else {
         if dotmode == FIND_ALLDOT && name.is_empty() {
@@ -706,11 +711,12 @@ pub fn do_drop(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd:
                 send_to_char(g, chid, &msg);
                 return;
             };
+            let (_, bare) = get_number(&arg);
             let mut multi = multi;
             let mut obj = Some(first);
             while let Some(o) = obj {
                 let list_after = carrying_after(g, chid, o);
-                let next = get_obj_in_list_vis(g, chid, &arg, None, &list_after);
+                let next = get_obj_in_list_vis(g, chid, &bare, Some(1), &list_after);
                 amount += perform_drop(g, chid, o, mode, sname, rdr);
                 multi -= 1;
                 obj = if multi != 0 { next } else { None };
@@ -755,9 +761,10 @@ pub fn do_drop(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, subcmd:
                 msg.extend_from_slice(b"s.\r\n");
                 send_to_char(g, chid, &msg);
             }
+            let (_, bare) = get_number(&name);
             while let Some(o) = obj {
                 let list_after = carrying_after(g, chid, o);
-                let next = get_obj_in_list_vis(g, chid, &name, None, &list_after);
+                let next = get_obj_in_list_vis(g, chid, &bare, Some(1), &list_after);
                 amount += perform_drop(g, chid, o, mode, sname, rdr);
                 obj = next;
             }
@@ -909,6 +916,7 @@ pub fn do_give(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd
                 send_to_char(g, chid, &msg);
                 return;
             };
+            let (_, bare) = get_number(&arg);
             let mut amount = amount;
             let mut obj = Some(first);
             while let Some(o) = obj {
@@ -918,7 +926,7 @@ pub fn do_give(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd
                 amount -= 1;
                 let list_after = carrying_after(g, chid, o);
                 perform_give(g, chid, vict, o);
-                obj = get_obj_in_list_vis(g, chid, &arg, None, &list_after);
+                obj = get_obj_in_list_vis(g, chid, &bare, Some(1), &list_after);
             }
         }
     } else {
@@ -1671,9 +1679,10 @@ pub fn do_wear(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd
             send_to_char(g, chid, &msg);
             return;
         };
+        let (_, bare) = get_number(&name);
         for o in carrying.into_iter().skip_while(|&o| o != first) {
             if !g.try_obj_alive(o) || g.obj(o).carried_by != Some(chid)
-                || !can_see_obj(g, chid, o) || !handler::isname(&name, handler::obj_name(g, o)) {
+                || !can_see_obj(g, chid, o) || !handler::isname(&bare, handler::obj_name(g, o)) {
                 continue;
             }
             if (g.ch(chid).level as i32) < g.obj(o).level {
