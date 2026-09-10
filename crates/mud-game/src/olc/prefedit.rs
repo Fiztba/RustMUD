@@ -865,7 +865,7 @@ pub fn prefedit_parse(
 
         PREFEDIT_COLOR | PREFEDIT_SYSLOG => {
             let syslog = olc.mode == PREFEDIT_SYSLOG;
-            let number = atoi(arg) - 1;
+            let number = atoi(arg).saturating_sub(1);
             if !(0..=3).contains(&number) {
                 let mut m: BStr = cc(g, ed, C_NRM, KBRED).to_vec();
                 m.extend_from_slice(b"That's not a valid choice!");
