@@ -159,7 +159,7 @@ pub fn take_copyover_plan(g: &mut Game) -> Option<CopyoverPlan> {
         let original = d.original;
 
         // A switched immortal is put back in their own body first.
-        // Returning out of do_copyover here would abort the whole copyover
+        // Returning from preparation here would abort the whole copyover
         // the moment anyone is switched, so un-switch and carry on.
         if och.is_some() && original.is_some() {
             if let Some(o) = och {

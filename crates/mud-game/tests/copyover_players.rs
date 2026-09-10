@@ -54,7 +54,15 @@ fn copyover_saves_player_and_inventory_after_the_final_pulse() {
     g.ch_mut(actor).pfilepos = 0;
     mud_game::handler::char_to_room(g, actor, 0);
     descriptor(g, actor, ConState::Playing);
+    let original = mud_game::db::read_object(g, 0).unwrap();
+    g.obj_mut(original).extra_flags.remove(flags::ITEM_NORENT);
+    g.obj_mut(original).type_flag = flags::ITEM_TREASURE;
+    g.obj_mut(original).cost_per_day = 1;
+    mud_game::handler::obj_to_char(g, original, actor);
     mud_game::copyover::do_copyover(g, actor, b"", 0, 0);
+    assert_eq!(g.obj(original).carried_by, Some(actor));
+    mud_game::handler::obj_from_char(g, original);
+    mud_game::handler::obj_to_room(g, original, 0);
     // Later commands and pulse updates can still change player state.
     mud_game::handler::char_from_room(g, actor);
     mud_game::handler::char_to_room(g, actor, 2);
@@ -72,4 +80,40 @@ fn copyover_saves_player_and_inventory_after_the_final_pulse() {
     let data = std::fs::read(path).unwrap();
     let records = mud_game::objsave::objsave_parse_objects(g, &mut mud_world::lex::Reader::new(&data));
     assert_eq!(records.len(), 1);
+}
+
+#[test]
+fn copyover_uses_connections_present_at_handoff() {
+    let mut f = fixture("connections"); let g = &mut f.game;
+    let departing = player(g, b"Departing", 12345);
+    mud_game::handler::char_to_room(g, departing, 0);
+    let old_di = descriptor(g, departing, ConState::Playing);
+    mud_game::copyover::do_copyover(g, departing, b"", 0, 0);
+    mud_game::run::close_socket(g, old_di);
+    let arriving = player(g, b"Arriving", 12346);
+    mud_game::handler::char_to_room(g, arriving, 1);
+    let new_di = descriptor(g, arriving, ConState::Playing);
+    let plan = mud_game::copyover::take_copyover_plan(g).unwrap();
+    assert_eq!(plan.descs, vec![new_di]);
+    assert_eq!(plan.entries.len(), 1);
+    assert_eq!(plan.entries[0].name, b"Arriving");
+    assert!(mud_game::copyover::take_copyover_plan(g).is_none());
+}
+
+#[test]
+fn switching_after_the_request_still_saves_the_original_player() {
+    let mut f = fixture("switched"); let g = &mut f.game;
+    let actor = player(g, b"Original", 12345);
+    mud_game::handler::char_to_room(g, actor, 0);
+    let di = descriptor(g, actor, ConState::Playing);
+    mud_game::copyover::do_copyover(g, actor, b"", 0, 0);
+    let body = mud_game::db::read_mobile(g, 0).unwrap();
+    mud_game::handler::char_to_room(g, body, 1);
+    g.descriptors.get_mut(di).unwrap().original = Some(actor);
+    g.descriptors.get_mut(di).unwrap().character = Some(body);
+    g.ch_mut(actor).desc = None; g.ch_mut(body).desc = Some(di);
+    let plan = mud_game::copyover::take_copyover_plan(g).unwrap();
+    assert_eq!(plan.entries[0].name, b"Original");
+    assert_eq!(g.descriptors.get(di).unwrap().character, Some(actor));
+    assert_eq!(g.ch(body).desc, None);
 }
