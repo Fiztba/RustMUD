@@ -119,9 +119,10 @@ pub fn load_config(lib_dir: &Path, cfg: &mut Config) -> Vec<String> {
                 } else if tag_is(&tag, "dflt_port") {
                     cfg.dflt_port = num as u16;
                 } else if tag_is(&tag, "default_map_size") {
-                    cfg.default_map_size = num;
+                    // Same bounds cedit enforces; the map canvas is 51 wide.
+                    cfg.default_map_size = num.clamp(1, 12);
                 } else if tag_is(&tag, "default_minimap_size") {
-                    cfg.default_minimap_size = num;
+                    cfg.default_minimap_size = num.clamp(1, 12);
                 }
             }
             b'f' => {
