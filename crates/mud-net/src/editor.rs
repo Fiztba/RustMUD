@@ -1668,6 +1668,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn decimal_parsers_saturate_without_changing_valid_prefixes() {
+        for (text, expected) in [
+            ("0", 0), (" +12tail", 12), ("-12tail", -12),
+            ("2147483647", i32::MAX), ("2147483648", i32::MAX),
+            ("-2147483648", i32::MIN), ("-2147483649", i32::MIN),
+            ("4294967297", i32::MAX), ("-4294967295", i32::MIN),
+            ("9223372036854775807", i32::MAX), ("-9223372036854775808", i32::MIN),
+        ] {
+            assert_eq!(parse_int_prefix(text.as_bytes()), expected);
+            let mut pos = 0; assert_eq!(scan_int(text.as_bytes(), &mut pos), Some(expected));
+            assert!(pos > 0);
+        }
+        for sign in ["", "-"] {
+            let text = format!("{sign}{}", "9".repeat(500));
+            let expected = if sign.is_empty() { i32::MAX } else { i32::MIN };
+            assert_eq!(parse_int_prefix(text.as_bytes()), expected);
+            let mut pos = 0; assert_eq!(scan_int(text.as_bytes(), &mut pos), Some(expected));
+            assert_eq!(pos, text.len());
+        }
+        assert_eq!(parse_int_prefix(b"word"), 0);
+        let mut pos = 0; assert_eq!(scan_int(b"word", &mut pos), None); assert_eq!(pos, 0);
+        assert_eq!(parse_range(b"4294967297-4294967298"), (2, i32::MAX, i32::MAX));
+    }
+
     // -- /e and /i -----------------------------------------------------------
 
     #[test]
