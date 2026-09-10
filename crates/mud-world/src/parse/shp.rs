@@ -231,10 +231,8 @@ fn ci_prefix(name: &[u8], buf: &[u8]) -> bool {
 /// MAX_STRING_LENGTH buffer — no blank/'*' skipping), cuts at ';' or else
 /// chops the final character (the newline), matches an item-type name
 /// prefix or scans a number, and keeps whatever trimmed text remains as the
-/// keyword of the LAST KEPT entry — the previous entry when this line's
-/// value was dropped. Terminates on a negative parsed value. A line with no
-/// digits and no type-name match is an error, as is a keyword with no entry
-/// to attach to.
+/// keyword of this entry if its type is accepted. Terminates on a negative
+/// parsed value. A line with no digits and no type-name match is an error.
 fn read_type_list(
     r: &mut Reader,
     world: &mut World,
@@ -297,15 +295,11 @@ fn read_type_list(
             end -= 1;
         }
 
+        let next = kept.len();
         add_to_shop_list(&mut kept, ListKind::Trade, num, world);
         if ptr < end {
-            match kept.last_mut() {
-                Some(last) => last.keywords = Some(buf[ptr..end].to_vec()),
-                None => {
-                    return Err(format!(
-                        "shop type-list keyword with no preceding entry ({ctx})"
-                    ));
-                }
+            if let Some(entry) = kept.get_mut(next) {
+                entry.keywords = Some(buf[ptr..end].to_vec());
             }
         }
         if num < 0 {
@@ -458,6 +452,26 @@ mod tests {
         data.extend_from_slice(b"0\n6\n1234\n2\n3033\n-1\n0\n28\n0\n0\n$~\n");
         parse_file(world, &data, "t.shp").expect("parse");
         world.shops.pop().expect("one shop")
+    }
+
+    #[test]
+    fn rejected_trade_entries_do_not_change_kept_keywords() {
+        for input in [
+            b"5 sword\n999 rock\n-1\n".as_slice(),
+            b"999 rock\n5 sword\n-1\n",
+            b"5 sword\n65535 rock\n-1 ignored\n",
+        ] {
+            let mut world = World::default();
+            let kept = read_type_list(&mut Reader::new(input), &mut world, true, 5, "test").unwrap();
+            assert_eq!(kept.len(), 1);
+            assert_eq!(kept[0].type_, 5);
+            assert_eq!(kept[0].keywords.as_deref(), Some(b"sword".as_slice()));
+        }
+        let mut input = b"5 sword\n".repeat(MAX_SHOP_OBJ);
+        input.extend_from_slice(b"5 rock\n-1\n");
+        let kept = read_type_list(&mut Reader::new(&input), &mut World::default(), true, 5, "test").unwrap();
+        assert_eq!(kept.len(), MAX_SHOP_OBJ);
+        assert!(kept.iter().all(|entry| entry.keywords.as_deref() == Some(b"sword".as_slice())));
     }
 
     #[test]
