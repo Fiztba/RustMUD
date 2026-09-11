@@ -71,7 +71,7 @@ fn help_save_replaces_the_file_whole_and_leaves_no_temporary() {
     assert!(path.exists(), "rename must replace an existing help.hlp");
     assert!(mud_game::olc::hedit::hedit_save_to_disk(g));
     assert_eq!(std::fs::read(&path).unwrap(), expected);
-    assert!(!path.with_extension("tmp").exists());
+    assert!(!mud_game::olc::temporary_path(&path).exists());
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn failed_help_save_preserves_original_file_and_reports_failure() {
     let path = g.lib_dir.join("text/help/help.hlp");
     let before = std::fs::read(&path).unwrap();
     let entries = g.help_table.len();
-    let temporary = path.with_extension("tmp"); std::fs::create_dir(&temporary).unwrap();
+    let temporary = mud_game::olc::temporary_path(&path); std::fs::create_dir(&temporary).unwrap();
     assert!(!mud_game::olc::hedit::hedit_save_to_disk(g), "a failed write must be reported");
     assert_eq!(std::fs::read(&path).unwrap(), before);
     assert_eq!(g.help_table.len(), entries);
@@ -97,7 +97,7 @@ fn social_save_replaces_the_file_whole_and_reloads_every_social() {
     let count = g.socials.len();
     assert!(mud_game::olc::aedit::aedit_save_to_disk(g));
     assert_eq!(std::fs::read(&path).unwrap(), expected_social_file(g));
-    assert!(!path.with_extension("tmp").exists());
+    assert!(!mud_game::olc::temporary_path(&path).exists());
     let (socials, _) = mud_game::social::boot_social_messages(&g.lib_dir).unwrap();
     assert_eq!(socials.len(), count);
 }
@@ -107,7 +107,7 @@ fn failed_social_save_preserves_original_file_and_reports_failure() {
     let mut f = fixture("social-failure"); let g = &mut f.game;
     let path = g.lib_dir.join("misc/socials.new");
     let before = std::fs::read(&path).unwrap();
-    let temporary = path.with_extension("tmp"); std::fs::create_dir(&temporary).unwrap();
+    let temporary = mud_game::olc::temporary_path(&path); std::fs::create_dir(&temporary).unwrap();
     assert!(!mud_game::olc::aedit::aedit_save_to_disk(g), "a failed write must be reported");
     assert_eq!(std::fs::read(&path).unwrap(), before);
     std::fs::remove_dir(&temporary).unwrap();
@@ -158,7 +158,7 @@ fn text_save_replaces_the_file_whole_and_leaves_no_temporary() {
     mud_game::olc::tedit::tedit_string_cleanup(g, di, olc, Some(b"First\r\nSecond\r\n".to_vec()), true);
     let path = g.lib_dir.join("text/news");
     assert_eq!(std::fs::read(&path).unwrap(), b"First\nSecond\n");
-    assert!(!path.with_extension("tmp").exists());
+    assert!(!mud_game::olc::temporary_path(&path).exists());
     assert_eq!(g.texts.news, b"First\r\nSecond\r\n");
     let output = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
     assert!(output.contains("Saved."));
@@ -174,11 +174,23 @@ fn failed_text_save_preserves_original_file_and_buffer() {
     let path = g.lib_dir.join("text/news");
     let before = std::fs::read(&path).unwrap();
     let original = g.texts.news.clone();
-    let temporary = path.with_extension("tmp"); std::fs::create_dir(&temporary).unwrap();
+    let temporary = mud_game::olc::temporary_path(&path); std::fs::create_dir(&temporary).unwrap();
     mud_game::olc::tedit::tedit_string_cleanup(g, di, olc, Some(b"Replacement\r\n".to_vec()), true);
     assert_eq!(std::fs::read(&path).unwrap(), before);
     assert_eq!(g.texts.news, original);
     let output = String::from_utf8_lossy(&g.descriptors.get(di).unwrap().output);
     assert!(!output.contains("Saved."), "a failed write must not be reported as saved");
     std::fs::remove_dir(&temporary).unwrap();
+}
+
+/// tbaMUD names its temporaries `"%s.tmp"`: appended to the whole file
+/// name, so tedit's `help` and hedit's `help.hlp` never share one.
+#[test]
+fn temporary_path_appends_tmp_to_the_full_file_name() {
+    use mud_game::olc::temporary_path;
+    let help = Path::new("lib/text/help");
+    assert_eq!(temporary_path(&help.join("help.hlp")), help.join("help.hlp.tmp"));
+    assert_eq!(temporary_path(&help.join("help")), help.join("help.tmp"));
+    assert_eq!(temporary_path(Path::new("lib/misc/socials.new")), Path::new("lib/misc/socials.new.tmp"));
+    assert_ne!(temporary_path(&help.join("help")), temporary_path(&help.join("help.hlp")));
 }
