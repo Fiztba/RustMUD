@@ -537,6 +537,31 @@ pub(crate) fn save_failed(what: &str) -> Vec<u8> {
         .into_bytes()
 }
 
+/// The sibling `write_replacing` writes before renaming over `path`: the
+/// full file name with `.tmp` appended (`help.hlp.tmp`, `socials.new.tmp`,
+/// `news.tmp`), as tbaMUD's `"%s.tmp"` does. Appending rather than
+/// replacing the extension keeps files that differ only by extension --
+/// hedit's `help.hlp` and tedit's `help` -- from sharing one temporary.
+pub fn temporary_path(path: &std::path::Path) -> std::path::PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".tmp");
+    name.into()
+}
+
+/// Write `bytes` to `path` by way of its `temporary_path` sibling that is
+/// renamed over the target once it is whole, so a write that fails part-way
+/// (disk full, I/O error) leaves the original file untouched rather than
+/// truncated. The temporary file is removed on failure.
+pub(crate) fn write_replacing(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let temporary = temporary_path(path);
+    let result = std::fs::write(&temporary, bytes)
+        .and_then(|()| std::fs::rename(&temporary, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
 /// An empty or absent string becomes "undefined".
 pub fn str_udup(s: &[u8]) -> BStr {
     if s.is_empty() {

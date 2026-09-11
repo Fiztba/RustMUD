@@ -427,7 +427,7 @@ pub fn hedit_save_to_disk(g: &mut Game) -> bool {
     out.extend_from_slice(b"$~\n");
 
     let path = g.lib_dir.join("text").join("help").join("help.hlp");
-    if std::fs::write(&path, &out).is_err() {
+    if crate::olc::write_replacing(&path, &out).is_err() {
         g.log("SYSERR: Could not write help index file".to_string());
         return false;
     }

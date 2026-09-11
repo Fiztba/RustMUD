@@ -1,4 +1,4 @@
-use mud_data::{flags, types::*};
+use mud_data::types::*;
 use mud_game::{ch::{Char, PlayerSpecials}, game::Game};
 use mud_net::descriptor::Descriptor;
 use std::path::{Path, PathBuf};
@@ -130,7 +130,7 @@ fn failed_message_save_or_delete_stays_open_and_can_retry() {
 fn failed_temporary_write_preserves_original_message_file() {
     let mut f = fixture("temporary-failure"); let g = &mut f.game;
     let path = g.lib_dir.join("misc/messages"); let before = std::fs::read(&path).unwrap();
-    let temporary = path.with_extension("tmp"); std::fs::create_dir(&temporary).unwrap();
+    let temporary = mud_game::olc::temporary_path(&path); std::fs::create_dir(&temporary).unwrap();
     assert!(!mud_game::olc::msgedit::save_messages_to_disk(g));
     assert_eq!(std::fs::read(&path).unwrap(), before);
     std::fs::remove_dir(&temporary).unwrap();
