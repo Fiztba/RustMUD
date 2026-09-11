@@ -195,6 +195,23 @@ pub fn delete_mobile(g: &mut Game, refpt: Idx) -> Option<Idx> {
     for zvnum in touched {
         add_to_save_list(g, zvnum, SL_ZON);
     }
+    // Open editors hold independent copies of these runtime mob indices:
+    // zedit scratch zones, and the rnum medit and sedit keep for their
+    // subject. Saving a stale copy would put an out-of-range rnum back
+    // into the live tables.
+    crate::olc::genzon::disable_prototype_resets_in_open_editors(g, vnum, refpt, true);
+    for olc in g.olc.values_mut() {
+        if olc.mob_rnum == refpt {
+            olc.mob_rnum = NOBODY;
+        } else if olc.mob_rnum != NOBODY && olc.mob_rnum > refpt {
+            olc.mob_rnum -= 1;
+        }
+        if olc.shop_keeper == refpt {
+            olc.shop_keeper = NOBODY;
+        } else if olc.shop_keeper != NOBODY && olc.shop_keeper > refpt {
+            olc.shop_keeper -= 1;
+        }
+    }
     // Shop keepers.
     for s in g.shops_rt.iter_mut() {
         if s.keeper == refpt {

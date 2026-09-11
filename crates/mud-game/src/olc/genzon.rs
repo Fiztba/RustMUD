@@ -332,14 +332,17 @@ pub fn count_commands(zone: &Zone) -> usize {
     zone.cmds.len()
 }
 
-/// Remove a deleted prototype's resets and the commands using their implicit
-/// mob/object targets, then shift surviving references to the shortened table.
-/// `mobile` selects the mobile table; false selects the object table.
-pub fn remove_prototype_resets(zone: &mut Zone, rnum: Idx, mobile: bool) -> bool {
+/// Shared body of the two prototype-reset walks: shift every surviving
+/// reference down past `rnum` and work out which commands die -- those
+/// naming the prototype, plus the `if_flag` chain and implicit-target
+/// commands hanging off them. Returns whether anything changed and one
+/// flag per command.
+fn kill_prototype_resets(zone: &mut Zone, rnum: Idx, mobile: bool) -> (bool, Vec<bool>) {
     let mut changed = false;
     let (mut mob_removed, mut tmob_removed, mut tobj_removed) = (false, false, false);
     let mut previous_removed = false;
-    zone.cmds.retain_mut(|cmd| {
+    let mut dead = Vec::with_capacity(zone.cmds.len());
+    for cmd in &mut zone.cmds {
         let mut remove = cmd.if_flag != 0 && previous_removed;
         let refs: Vec<&mut i32> = match cmd.command {
             b'M' if mobile => vec![&mut cmd.arg1],
@@ -378,9 +381,107 @@ pub fn remove_prototype_resets(zone: &mut Zone, rnum: Idx, mobile: bool) -> bool
         }
         previous_removed = remove;
         changed |= remove;
-        !remove
+        dead.push(remove);
+    }
+    (changed, dead)
+}
+
+/// Remove a deleted prototype's resets and the commands using their implicit
+/// mob/object targets, then shift surviving references to the shortened table.
+/// `mobile` selects the mobile table; false selects the object table.
+pub fn remove_prototype_resets(zone: &mut Zone, rnum: Idx, mobile: bool) -> bool {
+    let (changed, dead) = kill_prototype_resets(zone, rnum, mobile);
+    let mut i = 0;
+    zone.cmds.retain(|_| {
+        i += 1;
+        !dead[i - 1]
     });
     changed
+}
+
+/// The same walk over a zedit scratch zone, which is disabled in place rather
+/// than removed: zedit holds a cursor into this array across prompts
+/// (`olc.value` indexes `olc.zone.cmds`), and removing an entry from under it
+/// leaves it naming a different command -- or, at the end of the list, none.
+/// '*' is the mark renum_zone_table already puts on a reset command that cannot
+/// resolve; reset_zone treats it as a no-op and the .zon writer drops it.
+/// Returns the indices of the commands that were disabled.
+pub fn disable_prototype_resets(zone: &mut Zone, rnum: Idx, mobile: bool) -> Vec<usize> {
+    let (_, dead) = kill_prototype_resets(zone, rnum, mobile);
+    let mut killed = Vec::new();
+    for (i, cmd) in zone.cmds.iter_mut().enumerate() {
+        if dead[i] {
+            cmd.command = b'*';
+            killed.push(i);
+        }
+    }
+    killed
+}
+
+/// Fix up every open zone editor after a mobile or object prototype has left
+/// the tables at `rnum`. zedit_setup takes whole reset commands out of the
+/// zone table, so each open zedit holds its own copy of the rnums
+/// delete_mobile / delete_object have just renumbered; saving a stale copy
+/// puts an out-of-range index back into the live table. A builder part-way
+/// through filling in one of the killed commands is put back at the zone
+/// menu: every argument prompt switches on the command byte and none of them
+/// has a case for '*'.
+pub fn disable_prototype_resets_in_open_editors(g: &mut Game, vnum: Idx, rnum: Idx, mobile: bool) {
+    use crate::comm::write_to_desc;
+    use crate::olc::zedit::{
+        ZEDIT_ARG1, ZEDIT_ARG2, ZEDIT_ARG3, ZEDIT_COMMAND_TYPE, ZEDIT_IF_FLAG, ZEDIT_MAIN_MENU,
+        ZEDIT_SARG1, ZEDIT_SARG2,
+    };
+
+    let sessions: Vec<usize> = g.olc.keys().copied().collect();
+    for dsc in sessions {
+        let (dead, on_it) = {
+            let Some(olc) = g.olc.get_mut(&dsc) else { continue };
+            // olc.value only names a command while one is being filled in; in
+            // the menu it is a leftover.
+            let editing = matches!(
+                olc.mode,
+                ZEDIT_COMMAND_TYPE
+                    | ZEDIT_IF_FLAG
+                    | ZEDIT_ARG1
+                    | ZEDIT_ARG2
+                    | ZEDIT_ARG3
+                    | ZEDIT_SARG1
+                    | ZEDIT_SARG2
+            );
+            let cursor = olc.value;
+            let Some(zone) = olc.zone.as_mut() else { continue };
+            let killed = disable_prototype_resets(zone, rnum, mobile);
+            let on_it = editing && killed.iter().any(|&i| i as i32 == cursor);
+            (killed.len(), on_it)
+        };
+        if g.descriptors.get(dsc).map(|d| d.state) != Some(ConState::Zedit) {
+            continue;
+        }
+        if dead > 0 {
+            let msg = format!(
+                "\r\n{} {} has been deleted; {} reset command{} in the zone you are \
+                 editing no longer do{} anything.\r\n",
+                if mobile { "Mobile" } else { "Object" },
+                vnum,
+                dead,
+                if dead == 1 { "" } else { "s" },
+                if dead == 1 { "es" } else { "" }
+            );
+            write_to_desc(g, dsc, msg.as_bytes());
+        }
+        if on_it {
+            if let Some(olc) = g.olc.get_mut(&dsc) {
+                olc.mode = ZEDIT_MAIN_MENU;
+            }
+            write_to_desc(
+                g,
+                dsc,
+                b"That was the command you were editing, so you are back at the zone menu \
+                  -- press return for it.\r\n",
+            );
+        }
+    }
 }
 
 /// Disable resets tied to a deleted room, including commands using their implicit
