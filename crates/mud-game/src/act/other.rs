@@ -93,7 +93,11 @@ pub fn do_visible(g: &mut Game, chid: CharId, _arg: &[u8], _cmd: usize, _subcmd:
             send_to_char(g, chid, b"You are already fully visible.\r\n");
             return;
         }
-        g.ch_mut(chid).ps_mut().invis_level = 0;
+        // NPCs (a switched immortal, or a script) have no player_specials; C
+        // writes GET_INVIS_LEV into the shared dummy_mob there, a no-op.
+        if let Some(ps) = g.ch_mut(chid).player_specials.as_mut() {
+            ps.invis_level = 0;
+        }
         appear(g, chid);
         send_to_char(g, chid, b"You are now fully visible.\r\n");
         return;
