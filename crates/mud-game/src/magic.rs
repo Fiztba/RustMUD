@@ -863,6 +863,10 @@ pub fn mag_creations(g: &mut Game, _level: i32, chid: CharId, spellnum: i32) {
     };
     crate::handler::obj_to_char(g, tobj, chid);
     act(g, b"$n creates $p.", false, Some(chid), Some(tobj), None, comm::TO_ROOM);
+    // A listener's act trigger may have purged the new object.
+    if g.try_obj(tobj).is_none() {
+        return;
+    }
     act(g, b"You create $p.", false, Some(chid), Some(tobj), None, comm::TO_CHAR);
     crate::dg::triggers::load_otrigger(g, tobj);
 }

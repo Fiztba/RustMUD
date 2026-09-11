@@ -410,9 +410,15 @@ pub fn point_update(g: &mut Game) {
                     if room != NOWHERE {
                         if let Some(&first) = g.rooms[room as usize].people.first() {
                             act(g, b"A quivering horde of maggots consumes $p.", true, Some(first), Some(oid), None, TO_ROOM);
-                            act(g, b"A quivering horde of maggots consumes $p.", true, Some(first), Some(oid), None, TO_CHAR);
+                            // A listener's act trigger may have purged the corpse.
+                            if g.try_obj_alive(oid) {
+                                act(g, b"A quivering horde of maggots consumes $p.", true, Some(first), Some(oid), None, TO_CHAR);
+                            }
                         }
                     }
+                }
+                if !g.try_obj_alive(oid) {
+                    continue;
                 }
                 let contents = g.obj(oid).contains.clone();
                 let in_obj = g.obj(oid).in_obj;
