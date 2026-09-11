@@ -166,3 +166,56 @@ fn deleting_an_object_renumbers_higher_references_in_open_editors() {
     assert_eq!(g.olc[&d2].obj_rnum, 1);
     assert_eq!(g.olc[&d0].obj_rnum, NOTHING);
 }
+
+/// zedit keeps a cursor (`olc.value`) into its scratch command list while a
+/// command is being filled in. Killing the command under it must disable it
+/// in place, keep every later command at its index, and put the builder back
+/// at the zone menu, since no argument prompt has a case for '*'.
+#[test]
+fn deleting_a_mobile_under_an_open_zedit_cursor_disables_it_in_place() {
+    let mut f = fixture("cursor-mob"); let g = &mut f.game;
+    let last = (g.world.mob_protos.len() - 1) as Idx;
+    let cmds = vec![
+        ZoneCommand { command: b'M', arg1: last as i32, arg2: 1, arg3: 0, ..Default::default() },
+        ZoneCommand { command: b'O', arg1: 0, arg2: 1, arg3: 0, ..Default::default() },
+    ];
+    let da = open_zedit(g, cmds);
+    {
+        let olc = g.olc.get_mut(&da).unwrap();
+        olc.mode = mud_game::olc::zedit::ZEDIT_ARG2;
+        olc.value = 0;
+    }
+    assert_eq!(mud_game::olc::genmob::delete_mobile(g, last), Some(last));
+    let olc = &g.olc[&da];
+    let cmds = &olc.zone.as_ref().unwrap().cmds;
+    assert_eq!(cmds.len(), 2);
+    assert_eq!(cmds[0].command, b'*');
+    assert_eq!((cmds[1].command, cmds[1].arg1), (b'O', 0));
+    assert_eq!(olc.mode, mud_game::olc::zedit::ZEDIT_MAIN_MENU);
+    assert!(g.descriptors.get(da).unwrap().output.windows(11).any(|w| w == b"has been de"));
+}
+
+#[test]
+fn deleting_an_object_under_an_open_zedit_cursor_disables_it_in_place() {
+    let mut f = fixture("cursor-obj"); let g = &mut f.game;
+    let last = (g.world.obj_protos.len() - 1) as Idx;
+    let cmds = vec![
+        ZoneCommand { command: b'M', arg1: 0, arg2: 1, arg3: 0, ..Default::default() },
+        ZoneCommand { command: b'G', if_flag: 1, arg1: last as i32, arg2: 1, ..Default::default() },
+        ZoneCommand { command: b'O', arg1: 0, arg2: 1, arg3: 0, ..Default::default() },
+    ];
+    let da = open_zedit(g, cmds);
+    {
+        let olc = g.olc.get_mut(&da).unwrap();
+        olc.mode = mud_game::olc::zedit::ZEDIT_ARG1;
+        olc.value = 1;
+    }
+    assert_eq!(mud_game::olc::genobj::delete_object(g, last), Some(last));
+    let olc = &g.olc[&da];
+    let cmds = &olc.zone.as_ref().unwrap().cmds;
+    assert_eq!(cmds.len(), 3);
+    assert_eq!(cmds[0].command, b'M');
+    assert_eq!(cmds[1].command, b'*');
+    assert_eq!((cmds[2].command, cmds[2].arg1), (b'O', 0));
+    assert_eq!(olc.mode, mud_game::olc::zedit::ZEDIT_MAIN_MENU);
+}

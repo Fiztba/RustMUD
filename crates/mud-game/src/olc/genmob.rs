@@ -199,10 +199,8 @@ pub fn delete_mobile(g: &mut Game, refpt: Idx) -> Option<Idx> {
     // zedit scratch zones, and the rnum medit and sedit keep for their
     // subject. Saving a stale copy would put an out-of-range rnum back
     // into the live tables.
+    crate::olc::genzon::disable_prototype_resets_in_open_editors(g, vnum, refpt, true);
     for olc in g.olc.values_mut() {
-        if let Some(zone) = olc.zone.as_mut() {
-            crate::olc::genzon::remove_prototype_resets(zone, refpt, true);
-        }
         if olc.mob_rnum == refpt {
             olc.mob_rnum = NOBODY;
         } else if olc.mob_rnum != NOBODY && olc.mob_rnum > refpt {

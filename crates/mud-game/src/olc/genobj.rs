@@ -267,10 +267,8 @@ pub fn delete_object(g: &mut Game, rnum: Idx) -> Option<Idx> {
     // indices: zedit scratch zones and the rnum oedit keeps for its
     // subject. Saving a stale copy would put an out-of-range rnum back
     // into the live tables.
+    crate::olc::genzon::disable_prototype_resets_in_open_editors(g, vnum, rnum, false);
     for olc in g.olc.values_mut() {
-        if let Some(zone) = olc.zone.as_mut() {
-            crate::olc::genzon::remove_prototype_resets(zone, rnum, false);
-        }
         if olc.obj_rnum == rnum {
             olc.obj_rnum = NOTHING;
         } else if olc.obj_rnum != NOTHING && olc.obj_rnum > rnum {
