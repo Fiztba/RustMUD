@@ -99,16 +99,13 @@ fn parse_binary_control(data: &[u8]) -> Option<Vec<HouseControl>> {
     Some(out)
 }
 
-/// Only the writer's header or a leading "#<vnum>" line proves ASCII: a
-/// binary record starts with the house vnum (u16 LE), whose low byte can
-/// itself be '*' or '#'.
+/// Text never holds a NUL byte, while every binary house_control_rec does
+/// within its first 192 bytes (byte 5, the high byte of the u16 exit_num,
+/// is zero in any real record), so a NUL-free prefix is ASCII. The leading
+/// bytes alone cannot decide it: a binary record's vnum can begin with '*'
+/// or '#', and vnum 0x3023 with atrium 10 even spells "#0\n".
 fn is_ascii_control(data: &[u8]) -> bool {
-    if data.starts_with(b"* tbaMUD house control file") {
-        return true;
-    }
-    let Some(rest) = data.strip_prefix(b"#") else { return false };
-    let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
-    digits > 0 && matches!(rest.get(digits), Some(b'\n') | Some(b'\r'))
+    !data.iter().take(192).any(|&b| b == 0)
 }
 
 fn parse_ascii_control(data: &[u8]) -> Vec<HouseControl> {
@@ -202,14 +199,13 @@ pub fn house_boot(g: &mut Game) {
         ));
         v
     } else {
-        parse_ascii_control(&data)
-    };
-    if candidates.is_empty() && !data.is_empty() {
-        // Never rewrite a file that yielded nothing: a misread format must
-        // not wipe the houses it holds.
-        g.log("SYSERR: hcontrol file holds no readable house records; leaving it untouched.".to_string());
+        // Never rewrite a file that could not be read: a misread format
+        // must not wipe the houses it holds. An ASCII file with no records
+        // is legitimate (the writer's own output once the last house is
+        // destroyed) and rewriting it is a no-op, so it is not guarded.
+        g.log("SYSERR: hcontrol file is neither ASCII nor a known binary layout; leaving it untouched.".to_string());
         return;
-    }
+    };
 
     for h in candidates {
         if g.houses.len() >= MAX_HOUSES {

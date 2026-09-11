@@ -168,3 +168,96 @@ fn unreadable_hcontrol_is_left_untouched() {
     assert!(g.houses.is_empty());
     assert_eq!(std::fs::read(&path).unwrap(), garbage, "boot must not rewrite a file it could not read");
 }
+
+fn syserrs(g: &Game) -> Vec<&String> {
+    g.log_lines.iter().filter(|l| l.starts_with("SYSERR")).collect()
+}
+
+#[test]
+fn writer_produced_empty_hcontrol_boots_quietly_and_unchanged() {
+    let mut f = fixture("hcontrol-empty-ascii"); let g = &mut f.game;
+    g.houses.clear();
+    mud_game::house::house_save_control(g);
+    let path = g.lib_dir.join("etc").join("hcontrol");
+    let written = std::fs::read(&path).unwrap();
+    assert!(written.starts_with(b"* tbaMUD house control file"));
+    for boot in 1..=2 {
+        g.log_lines.clear();
+        mud_game::house::house_boot(g);
+        assert!(g.houses.is_empty());
+        assert!(syserrs(g).is_empty(), "boot {boot} logged {:?}", syserrs(g));
+        assert_eq!(std::fs::read(&path).unwrap(), written, "boot {boot} changed the file");
+    }
+}
+
+#[test]
+fn zero_byte_hcontrol_boots_quietly_twice() {
+    let mut f = fixture("hcontrol-zero-byte"); let g = &mut f.game;
+    let path = g.lib_dir.join("etc").join("hcontrol");
+    std::fs::write(&path, b"").unwrap();
+    g.houses.clear();
+    for boot in 1..=2 {
+        g.log_lines.clear();
+        mud_game::house::house_boot(g);
+        assert!(g.houses.is_empty());
+        assert!(syserrs(g).is_empty(), "boot {boot} logged {:?}", syserrs(g));
+    }
+}
+
+#[test]
+fn hand_edited_ascii_hcontrol_with_other_comment_loads_its_house() {
+    let mut f = fixture("hcontrol-hand-edited"); let g = &mut f.game;
+    let vnum = house_room(g);
+    let atrium = g.world.rooms[0].vnum as i32;
+    // Not the writer's header, and padded to a binary record size so a
+    // length-based reader would take it for one LP64 record.
+    let mut text = format!(
+        "* my houses\n#{vnum}\nAtrm: {atrium}\nExit: 0\nBilt: 1700000000\nMode: 0\nOwnr: 12345\nPay : 1750000000\nGsts: 777\n$~\n"
+    ).into_bytes();
+    assert!(text.len() < 192);
+    while text.len() < 192 {
+        text.push(b'\n');
+    }
+    assert_eq!(text.len(), 192);
+    let path = g.lib_dir.join("etc").join("hcontrol");
+    std::fs::write(&path, &text).unwrap();
+    g.houses.clear();
+    mud_game::house::house_boot(g);
+    assert_eq!(g.houses.len(), 1, "hand-edited ASCII file of binary record length");
+    assert_eq!(g.houses[0].vnum, vnum);
+    assert_eq!(g.houses[0].owner, 12345);
+    assert_eq!(g.houses[0].guests, vec![777]);
+}
+
+#[test]
+fn binary_hcontrol_whose_first_bytes_spell_an_ascii_vnum_line_loads_as_binary() {
+    let mut f = fixture("hcontrol-hash-zero-newline"); let g = &mut f.game;
+    // vnum 0x3023 is the bytes "#0" and atrium 10 follows with "\n\0": the
+    // record begins "#0\n", exactly what an ASCII "#<vnum>" line looks like.
+    let vnum = 0x3023;
+    let atrium = 10;
+    let atrium_rnum = g.real_room(atrium).expect("room 10 exists in the mini world");
+    let room = g.world.rooms.iter().position(|r| r.vnum as i32 != atrium).unwrap();
+    let old_vnum = g.world.rooms[room].vnum;
+    g.world.room_map.remove(&old_vnum);
+    g.world.rooms[room].vnum = vnum as _;
+    g.world.room_map.insert(vnum as _, room as _);
+    g.world.rooms[room].dir_option[0] = Some(Box::new(mud_world::model::Exit {
+        general_description: None, keyword: None, exit_info: 0, key: mud_data::types::NOTHING,
+        to_room_vnum: atrium, to_room: atrium_rnum,
+    }));
+    g.player_table.push(mud_game::game::PlayerIndexElement {
+        name: b"owner".to_vec(), id: 12345, level: 10, flags: 0, last: g.now,
+    });
+    let data = binary_hcontrol(vnum, atrium, 12345);
+    assert!(data.starts_with(b"#0\n"));
+    let path = g.lib_dir.join("etc").join("hcontrol");
+    std::fs::write(&path, &data).unwrap();
+    g.houses.clear();
+    mud_game::house::house_boot(g);
+    assert_eq!(g.houses.len(), 1);
+    assert_eq!(g.houses[0].vnum, vnum);
+    assert_eq!(g.houses[0].atrium, atrium);
+    assert_eq!(g.houses[0].guests, vec![777]);
+    assert!(std::fs::read(&path).unwrap().starts_with(b"* tbaMUD house control file"), "converted");
+}
