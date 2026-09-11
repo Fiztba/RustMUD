@@ -208,6 +208,11 @@ fn map_area(
     ypos: i32,
     worldmap: bool,
 ) {
+    // Off the canvas nothing can be marked or read back, so the walk must
+    // stop here rather than bouncing between rooms it can never record.
+    if x < 0 || y < 0 || x >= MAX_MAP || y >= MAX_MAP {
+        return;
+    }
     if at(map, x, y) < 0 {
         return; // this is a door
     }
@@ -521,7 +526,7 @@ pub fn str_and_map(g: &mut Game, chid: CharId, str_: &[u8], target_room: RoomRnu
         return;
     }
 
-    let size = g.config.default_minimap_size;
+    let size = g.config.default_minimap_size.clamp(1, MAX_MAP_SIZE);
     let centre = MAX_MAP / 2;
     let (min, max) = (centre - 2 * size, centre + 2 * size);
     let mut map = blank_canvas(worldmap);
