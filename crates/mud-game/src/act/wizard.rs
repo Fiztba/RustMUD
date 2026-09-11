@@ -617,6 +617,10 @@ pub fn do_load(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcmd
                 comm::TO_ROOM,
             );
             act(g, b"$n has created $p!", false, Some(chid), Some(obj), None, comm::TO_ROOM);
+            // A listener's act trigger may have purged the object already.
+            if g.try_obj(obj).is_none() {
+                continue;
+            }
             act(g, b"You create $p.", false, Some(chid), Some(obj), None, comm::TO_CHAR);
             crate::dg::triggers::load_otrigger(g, obj);
         }
@@ -697,7 +701,10 @@ pub fn do_purge(g: &mut Game, chid: CharId, argument: &[u8], _cmd: usize, _subcm
                 crate::handler::get_obj_in_list_vis_counted(g, chid, &name, &mut count2, &contents)
             {
                 act(g, b"$n destroys $p.", false, Some(chid), Some(obj), None, comm::TO_ROOM);
-                crate::handler::extract_obj(g, obj);
+                // A listener's act trigger may have purged the object already.
+                if g.try_obj(obj).is_some() {
+                    crate::handler::extract_obj(g, obj);
+                }
             } else {
                 send_to_char(g, chid, b"Nothing here by that name.\r\n");
                 return;
