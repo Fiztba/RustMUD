@@ -740,14 +740,17 @@ pub fn affect_join(
     if let Some(idx) = found {
         {
             let hjp = &g.ch(chid).affected[idx];
+            // Accumulating spells (strength, sense life, waterwalk...) can be
+            // recast without limit on NPC and LVL_GRGOD+ targets, so both
+            // sums must clamp at the field's limit rather than overflow.
             if add_dur {
-                af.duration += hjp.duration;
+                af.duration = af.duration.saturating_add(hjp.duration);
             }
             if avg_dur {
                 af.duration /= 2;
             }
             if add_mod {
-                af.modifier += hjp.modifier;
+                af.modifier = af.modifier.saturating_add(hjp.modifier);
             }
             if avg_mod {
                 af.modifier /= 2;
