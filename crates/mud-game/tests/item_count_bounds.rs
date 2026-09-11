@@ -146,3 +146,19 @@ fn get_with_positive_count_still_takes_that_many() {
     assert_eq!(g.ch(actor).carry_items, 2, "{out}");
     assert!(!out.contains(REFUSAL), "{out}");
 }
+
+#[test]
+fn get_from_container_with_negative_count_refuses() {
+    let mut f = fixture("get-cont-neg"); let g = &mut f.game;
+    let actor = player(g, b"Getter", 12345);
+    let di = descriptor(g, actor, ConState::Playing);
+    mud_game::handler::char_to_room(g, actor, 0);
+    let sack = bag(g); mud_game::handler::obj_to_char(g, sack, actor);
+    for _ in 0..2 { let b = bread(g); mud_game::handler::obj_to_obj(g, b, sack); }
+    output(g, di);
+    mud_game::act::item::do_get(g, actor, b"-1 bread bag", 0, 0);
+    let out = output(g, di);
+    assert_eq!(g.obj(sack).contains.len(), 2, "{out}");
+    assert_eq!(g.ch(actor).carry_items, 1, "{out}");
+    assert!(out.contains(REFUSAL), "{out}");
+}
