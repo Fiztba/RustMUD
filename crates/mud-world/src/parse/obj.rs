@@ -367,11 +367,11 @@ mod tests {
     /// `+ 5` weight fix-up overflow and abort the whole world boot.
     #[test]
     fn drinkcon_weight_fixup_saturates_at_max_capacity() {
-        let body = |type_flag: &str, capacity: &str| {
+        let body = |type_flag: &str, capacity: &str, wear: &str| {
             let mut d = Vec::new();
             d.extend_from_slice(HEAD);
             d.extend_from_slice(
-                format!("{type_flag} 0 0 0 0 a 0 0 0 0 0 0 0
+                format!("{type_flag} 0 0 0 0 {wear} 0 0 0 0 0 0 0
 {capacity} {capacity} 1 0
 1 20 8 0 0
 $~
@@ -381,16 +381,22 @@ $~
             d
         };
         // Drink container with a maximal capacity: no panic, weight pinned.
-        let w = parse(&body("17", "2147483647"));
+        let w = parse(&body("17", "2147483647", "a"));
         assert_eq!(w.obj_protos[0].values[1], i32::MAX);
         assert_eq!(w.obj_protos[0].weight, i32::MAX);
         // Fountains take the same path.
-        let w = parse(&body("23", "2147483647"));
+        let w = parse(&body("23", "2147483647", "a"));
         assert_eq!(w.obj_protos[0].weight, i32::MAX);
         // Ordinary capacity: still exactly value[1] + 5.
-        let w = parse(&body("17", "40"));
+        let w = parse(&body("17", "40", "a"));
         assert_eq!(w.obj_protos[0].weight, w.obj_protos[0].values[1] + 5);
         assert_eq!(w.obj_protos[0].weight, 45);
+        // Control: not takeable (no TAKE bit in wear_flags), so the fix-up
+        // branch is never entered even at a maximal capacity; weight stays
+        // exactly what the third numeric line specified.
+        let w = parse(&body("17", "2147483647", "0"));
+        assert_eq!(w.obj_protos[0].values[1], i32::MAX);
+        assert_eq!(w.obj_protos[0].weight, 1);
     }
 
     /// The T line's first token is scanned with a width, so an over-long one
