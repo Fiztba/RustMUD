@@ -99,6 +99,15 @@ fn parse_binary_control(data: &[u8]) -> Option<Vec<HouseControl>> {
     Some(out)
 }
 
+/// Text never holds a NUL byte, while every binary house_control_rec does
+/// within its first 192 bytes (byte 5, the high byte of the u16 exit_num,
+/// is zero in any real record), so a NUL-free prefix is ASCII. The leading
+/// bytes alone cannot decide it: a binary record's vnum can begin with '*'
+/// or '#', and vnum 0x3023 with atrium 10 even spells "#0\n".
+fn is_ascii_control(data: &[u8]) -> bool {
+    !data.iter().take(192).any(|&b| b == 0)
+}
+
 fn parse_ascii_control(data: &[u8]) -> Vec<HouseControl> {
     let mut out: Vec<HouseControl> = Vec::new();
     let mut cur: Option<HouseControl> = None;
@@ -181,23 +190,21 @@ pub fn house_boot(g: &mut Game) {
         return;
     };
 
-    let is_ascii = data.starts_with(b"*") || data.starts_with(b"#");
-    let candidates = if is_ascii {
+    let candidates = if is_ascii_control(&data) {
         parse_ascii_control(&data)
+    } else if let Some(v) = parse_binary_control(&data) {
+        g.log(format!(
+            "   Converting legacy binary hcontrol ({} records) to ASCII.",
+            v.len()
+        ));
+        v
     } else {
-        match parse_binary_control(&data) {
-            Some(v) => {
-                g.log(format!(
-                    "   Converting legacy binary hcontrol ({} records) to ASCII.",
-                    v.len()
-                ));
-                v
-            }
-            None => {
-                g.log("SYSERR: hcontrol file is neither ASCII nor a known binary layout.".to_string());
-                return;
-            }
-        }
+        // Never rewrite a file that could not be read: a misread format
+        // must not wipe the houses it holds. An ASCII file with no records
+        // is legitimate (the writer's own output once the last house is
+        // destroyed) and rewriting it is a no-op, so it is not guarded.
+        g.log("SYSERR: hcontrol file is neither ASCII nor a known binary layout; leaving it untouched.".to_string());
+        return;
     };
 
     for h in candidates {

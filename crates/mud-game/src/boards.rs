@@ -242,25 +242,29 @@ pub fn board_load_board(g: &mut Game, board: usize) {
     if data.is_empty() {
         return;
     }
-    let is_ascii = data.starts_with(b"*") || data.starts_with(b"Head");
+    // A binary file's leading int num_of_msgs can begin with '*' (42) or any
+    // other byte, so only an ASCII header or tag proves ASCII; anything else
+    // is tried as binary first.
+    let is_ascii = data.starts_with(b"* tbaMUD board file") || data.starts_with(b"Head:");
+    let mut converted = false;
     let records = if is_ascii {
         parse_ascii_board(&data)
+    } else if let Some(v) = parse_binary_board(&data) {
+        g.log(format!(
+            "   Converting legacy binary board {} ({} messages) to ASCII.",
+            board,
+            v.len()
+        ));
+        converted = true;
+        v
     } else {
-        match parse_binary_board(&data) {
-            Some(v) => {
-                g.log(format!(
-                    "   Converting legacy binary board {} ({} messages) to ASCII.",
-                    board,
-                    v.len()
-                ));
-                v
-            }
-            None => {
-                g.log(format!("SYSERR: Board file {} corrupt.  Resetting.", board));
-                board_reset_board(g, board);
-                return;
-            }
+        let v = parse_ascii_board(&data);
+        if v.is_empty() {
+            g.log(format!("SYSERR: Board file {} corrupt.  Resetting.", board));
+            board_reset_board(g, board);
+            return;
         }
+        v
     };
 
     for (heading, level, body) in records {
@@ -275,7 +279,7 @@ pub fn board_load_board(g: &mut Game, board: usize) {
         g.boards.storage[slot] = body;
         g.boards.msgs[board].push(MsgInfo { slot_num: slot as i32, heading: Some(heading), level });
     }
-    if !is_ascii {
+    if converted {
         board_save_board(g, board);
     }
 }
