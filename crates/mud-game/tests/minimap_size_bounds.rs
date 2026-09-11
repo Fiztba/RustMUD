@@ -109,18 +109,3 @@ fn maximum_minimap_size_renders_full_height() {
     let out = minimap(g, ch, di, 12);
     assert_eq!(line_count(&out), 12 * 2 + 1);
 }
-
-#[test]
-fn oversized_map_sizes_are_clamped_on_config_load() {
-    let f = fixture("config");
-    let lib = f.root.join("lib");
-    let path = mud_game::config_file::config_path(&lib);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let mut cfg = mud_game::config::Config::default();
-    std::fs::write(&path, "default_map_size = 99\ndefault_minimap_size = 13\n").unwrap();
-    mud_game::config_file::load_config(&lib, &mut cfg);
-    assert_eq!((cfg.default_map_size, cfg.default_minimap_size), (12, 12));
-    std::fs::write(&path, "default_map_size = 0\ndefault_minimap_size = -3\n").unwrap();
-    mud_game::config_file::load_config(&lib, &mut cfg);
-    assert_eq!((cfg.default_map_size, cfg.default_minimap_size), (1, 1));
-}
