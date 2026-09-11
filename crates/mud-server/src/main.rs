@@ -423,6 +423,9 @@ fn main() {
                     } else if i + 1 < args.len() {
                         i += 1;
                         logname = Some(args[i].clone());
+                    } else {
+                        eprintln!("SYSERR: File name to log to expected after option -o.");
+                        std::process::exit(1);
                     }
                 }
                 "m" => {
