@@ -1519,27 +1519,32 @@ pub fn extract_char_final(g: &mut Game, chid: CharId) {
         }
     }
 
-    let desc = g.ch(chid).desc;
-    if let Some(di) = desc {
-        // Boot same-idnum dupes trying to log in (anti-dupe).
-        let id = g.ch(chid).idnum;
-        for odi in g.descriptors.indices() {
-            if odi == di {
-                continue;
-            }
-            let Some(od) = g.descriptors.get(odi) else { continue };
-            let boot = od.character.and_then(|c| g.try_ch(c)).is_some_and(|c| !c.is_npc() && c.idnum == id);
-            if boot {
-                if let Some(od) = g.descriptors.get_mut(odi) {
-                    od.state = ConState::Close;
+    if let Some(di) = g.ch(chid).desc {
+        if g.descriptors.get(di).and_then(|d| d.original).is_some() {
+            // This is the body someone switched into: put the switcher
+            // back into their own body, which takes the descriptor along.
+            crate::act::wizard::do_return(g, chid, b"", 0, 0);
+        } else {
+            // Boot same-idnum dupes trying to log in (anti-dupe).
+            let id = g.ch(chid).idnum;
+            for odi in g.descriptors.indices() {
+                if odi == di {
+                    continue;
+                }
+                let Some(od) = g.descriptors.get(odi) else { continue };
+                let boot = od.character.and_then(|c| g.try_ch(c)).is_some_and(|c| !c.is_npc() && c.idnum == id);
+                if boot {
+                    if let Some(od) = g.descriptors.get_mut(odi) {
+                        od.state = ConState::Close;
+                    }
                 }
             }
+            if let Some(d) = g.descriptors.get_mut(di) {
+                d.state = ConState::Menu;
+            }
+            let menu = g.config.menu.clone();
+            crate::comm::write_to_desc(g, di, &menu);
         }
-        if let Some(d) = g.descriptors.get_mut(di) {
-            d.state = ConState::Menu;
-        }
-        let menu = g.config.menu.clone();
-        crate::comm::write_to_desc(g, di, &menu);
     }
 
     // Follower/master cleanup (die_follower messages come with stage 4-5).
@@ -1630,8 +1635,9 @@ pub fn extract_char_final(g: &mut Game, chid: CharId) {
         .retain(|e| !matches!(e.kind, crate::game::EventKind::Whirlwind { ch } if ch == chid));
 
     // "If there's a descriptor, they're in the menu now." — only NPCs and
-    // desc-less PCs are freed.
-    if is_npc || desc.is_none() {
+    // desc-less PCs are freed. Re-read the descriptor: do_return above
+    // hands it back to the switcher, leaving this body without one.
+    if is_npc || g.ch(chid).desc.is_none() {
         free_char(g, chid);
     }
 }
