@@ -332,7 +332,7 @@ pub fn do_mload(g: &mut Game, chid: CharId, argument: &[u8]) {
             mob_log(g, chid, &msg);
             return;
         };
-        let Some(mob_rnum) = g.world.real_mobile(number as Idx) else {
+        let Some(mob_rnum) = g.real_mobile(number) else {
             mob_log(g, chid, "mload: bad mob vnum");
             return;
         };
@@ -347,7 +347,7 @@ pub fn do_mload(g: &mut Game, chid: CharId, argument: &[u8]) {
         }
         load_mtrigger(g, mob);
     } else if crate::handler::is_abbrev(&arg1, b"obj") {
-        let Some(obj_rnum) = g.world.real_object(number as Idx) else {
+        let Some(obj_rnum) = g.real_object(number) else {
             mob_log(g, chid, "mload: bad object vnum");
             return;
         };
@@ -762,7 +762,7 @@ pub fn do_mtransform(g: &mut Game, chid: CharId, argument: &[u8]) {
     let keep_hp = arg[0].is_ascii_digit();
     let vnum = if keep_hp { atoi32(&arg) } else { atoi32(&arg[1..]) };
 
-    let m_rnum = g.world.real_mobile(vnum as Idx);
+    let m_rnum = g.real_mobile(vnum);
     let m = m_rnum.and_then(|r| crate::db::read_mobile(g, r));
     let Some(m) = m else {
         mob_log(g, chid, "mtransform: bad mobile vnum");

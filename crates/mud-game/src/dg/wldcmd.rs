@@ -259,7 +259,7 @@ fn do_wload(g: &mut Game, room: RoomRnum, argument: &[u8], _subcmd: i32) {
             wld_log(g, room, &msg);
             return;
         };
-        let mob = g.world.real_mobile(number as Idx).and_then(|r| crate::db::read_mobile(g, r));
+        let mob = g.real_mobile(number).and_then(|r| crate::db::read_mobile(g, r));
         let Some(mob) = mob else {
             // The message says "mload" — kept as-is.
             wld_log(g, room, "mload: bad mob vnum");
@@ -272,7 +272,7 @@ fn do_wload(g: &mut Game, room: RoomRnum, argument: &[u8], _subcmd: i32) {
         }
         load_mtrigger(g, mob);
     } else if crate::handler::is_abbrev(&arg1, b"obj") {
-        let object = g.world.real_object(number as Idx).and_then(|r| crate::db::read_object(g, r));
+        let object = g.real_object(number).and_then(|r| crate::db::read_object(g, r));
         let Some(object) = object else {
             wld_log(g, room, "wload: bad object vnum");
             return;

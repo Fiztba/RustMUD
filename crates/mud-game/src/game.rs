@@ -394,6 +394,30 @@ impl Game {
         self.world.real_room(vnum as Idx)
     }
 
+    /// real_mobile helper, keyed by u16 vnum.
+    pub fn real_mobile(&self, vnum: i32) -> Option<Idx> {
+        if !(0..65535).contains(&vnum) {
+            return None;
+        }
+        self.world.real_mobile(vnum as Idx)
+    }
+
+    /// real_object helper, keyed by u16 vnum.
+    pub fn real_object(&self, vnum: i32) -> Option<Idx> {
+        if !(0..65535).contains(&vnum) {
+            return None;
+        }
+        self.world.real_object(vnum as Idx)
+    }
+
+    /// real_trigger helper, keyed by u16 vnum.
+    pub fn real_trigger(&self, vnum: i32) -> Option<Idx> {
+        if !(0..65535).contains(&vnum) {
+            return None;
+        }
+        self.world.real_trigger(vnum as Idx)
+    }
+
     /// Schedule a mud event (event_create: `when` clamped to >= 1).
     pub fn queue_event(&mut self, fire_in_pulses: u64, kind: EventKind) {
         self.next_event_seq += 1;
